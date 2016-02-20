@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-angular.module('mm', ['ionic', 'mm.core', 'mm.core.contentlinks', 'mm.core.course', 'mm.core.courses', 'mm.core.login', 'mm.core.settings', 'mm.core.sidemenu', 'mm.core.textviewer', 'mm.core.user', 'mm.addons.calendar', 'mm.addons.coursecompletion', 'mm.addons.files', 'mm.addons.frontpage', 'mm.addons.grades', 'mm.addons.messages', 'mm.addons.mod_assign', 'mm.addons.mod_book', 'mm.addons.mod_chat', 'mm.addons.mod_choice', 'mm.addons.mod_folder', 'mm.addons.mod_forum', 'mm.addons.mod_glossary', 'mm.addons.mod_imscp', 'mm.addons.mod_label', 'mm.addons.mod_lti', 'mm.addons.mod_page', 'mm.addons.mod_resource', 'mm.addons.mod_scorm', 'mm.addons.mod_survey', 'mm.addons.mod_url', 'mm.addons.notes', 'mm.addons.notifications', 'mm.addons.participants', 'mm.addons.pushnotifications', 'mm.addons.remotestyles', 'ngCordova', 'angular-md5', 'pascalprecht.translate', 'ngAria', 'ngIOS9UIWebViewPatch'])
+angular.module('mm', ['ionic', 'mm.core', 'mm.core.course', 'mm.core.courses', 'mm.core.login', 'mm.core.settings', 'mm.core.sidemenu', 'mm.core.textviewer', 'mm.core.user', 'mm.addons.calendar', 'mm.addons.coursecompletion', 'mm.addons.frontpage', 'mm.addons.grades', 'mm.addons.messages', 'mm.addons.mod_assign', 'mm.addons.mod_book', 'mm.addons.mod_chat', 'mm.addons.mod_choice', 'mm.addons.mod_folder', 'mm.addons.mod_forum', 'mm.addons.mod_imscp', 'mm.addons.mod_label', 'mm.addons.mod_lti', 'mm.addons.mod_page', 'mm.addons.mod_resource', 'mm.addons.mod_scorm', 'mm.addons.mod_survey', 'mm.addons.mod_url', 'mm.addons.notes', 'mm.addons.notifications', 'mm.addons.participants', 'mm.addons.pushnotifications', 'mm.addons.remotestyles', 'ngCordova', 'angular-md5', 'pascalprecht.translate', 'ngAria', 'ngIOS9UIWebViewPatch'])
 .run(["$ionicPlatform", function($ionicPlatform) {
   $ionicPlatform.ready(function() {
     if (window.cordova && window.cordova.plugins && window.cordova.plugins.Keyboard) {
@@ -57,7 +57,6 @@ angular.module('mm.core', ['pascalprecht.translate'])
                 state: null,
                 params: null
             },
-            cache: false,
             controller: ["$scope", "$state", "$stateParams", "$mmSite", "$mmSitesManager", "$ionicHistory", function($scope, $state, $stateParams, $mmSite, $mmSitesManager, $ionicHistory) {
                 $ionicHistory.nextViewOptions({disableBack: true});
                 function loadSiteAndGo() {
@@ -311,6 +310,102 @@ angular.module('mm.core')
         return $mmApp.getDB().remove(mmCoreConfigStore, name);
     };
     return self;
+}]);
+
+angular.module('mm.core')
+.provider('$mmContentLinksDelegate', function() {
+    var linkHandlers = {},
+        self = {};
+        self.registerLinkHandler = function(name, handler, priority) {
+        if (typeof linkHandlers[name] !== 'undefined') {
+            console.log("$mmContentLinksDelegateProvider: Addon '" + linkHandlers[name].name +
+                        "' already registered as link handler");
+            return false;
+        }
+        console.log("$mmContentLinksDelegateProvider: Registered handler '" + name + "' as link handler.");
+        linkHandlers[name] = {
+            name: name,
+            handler: handler,
+            instance: undefined,
+            priority: typeof priority === 'undefined' ? 100 : priority
+        };
+        return true;
+    };
+    self.$get = ["$mmUtil", "$log", "$mmSite", "$q", function($mmUtil, $log, $mmSite, $q) {
+        var enabledLinkHandlers = {},
+            self = {};
+        $log = $log.getInstance('$mmContentLinksDelegate');
+                self.getActionsFor = function(url, courseid) {
+            if (!url) {
+                return [];
+            }
+            var linkActions = {};
+            angular.forEach(enabledLinkHandlers, function(handler) {
+                if (handler.instance && angular.isFunction(handler.instance.getActions)) {
+                    var actions = handler.instance.getActions(url, courseid);
+                    if (actions && actions.length) {
+                        linkActions[handler.priority] = actions;
+                    }
+                }
+            });
+            return sortActionsByPriority(linkActions);
+        };
+                function sortActionsByPriority(actions) {
+            var sorted = [],
+                priorities = Object.keys(actions);
+            priorities = priorities.sort(function(a, b) {
+                return parseInt(a, 10) > parseInt(b, 10);
+            });
+            priorities.forEach(function(priority) {
+                var list = actions[priority];
+                list.forEach(function(action) {
+                    sorted.push(action);
+                });
+            });
+            return sorted;
+        }
+                self.updateLinkHandler = function(name, handlerInfo) {
+            var promise;
+            if (typeof handlerInfo.instance === 'undefined') {
+                handlerInfo.instance = $mmUtil.resolveObject(handlerInfo.handler, true);
+            }
+            if (!$mmSite.isLoggedIn()) {
+                promise = $q.reject();
+            } else {
+                promise = $q.when(handlerInfo.instance.isEnabled());
+            }
+            return promise.then(function(enabled) {
+                if (enabled) {
+                    enabledLinkHandlers[name] = {
+                        instance: handlerInfo.instance,
+                        priority: handlerInfo.priority
+                    };
+                } else {
+                    return $q.reject();
+                }
+            }).catch(function() {
+                delete enabledLinkHandlers[name];
+            });
+        };
+                self.updateLinkHandlers = function() {
+            var promises = [];
+            $log.debug('Updating link handlers for current site.');
+            angular.forEach(linkHandlers, function(handler, name) {
+                promises.push(self.updateLinkHandler(name, handler));
+            });
+            return $q.all(promises).then(function() {
+                return true;
+            }, function() {
+                return true;
+            });
+        };
+        return self;
+    }];
+    return self;
+})
+.run(["$mmEvents", "$mmContentLinksDelegate", "mmCoreEventLogin", "mmCoreEventSiteUpdated", function($mmEvents, $mmContentLinksDelegate, mmCoreEventLogin, mmCoreEventSiteUpdated) {
+    $mmEvents.on(mmCoreEventLogin, $mmContentLinksDelegate.updateLinkHandlers);
+    $mmEvents.on(mmCoreEventSiteUpdated, $mmContentLinksDelegate.updateLinkHandlers);
 }]);
 
 angular.module('mm.core')
@@ -3128,7 +3223,7 @@ angular.module('mm.core')
             }
             var siteurl = $mmText.removeProtocolAndWWW(this.siteurl);
             url = $mmText.removeProtocolAndWWW(url);
-            return url.indexOf(siteurl) == 0;
+            return url.indexOf(siteurl) > -1;
         };
                 function invalidateWsCacheEntries(db, entries) {
             var promises = [];
@@ -3297,11 +3392,7 @@ angular.module('mm.core')
         }
     };
         self.siteExists = function(siteurl) {
-        var url = siteurl + '/login/token.php';
-        if (!ionic.Platform.isWebView()) {
-            url = url + '?username=a&password=b&service=c';
-        }
-        return $http.get(url, {timeout: 30000});
+        return $http.get(siteurl + '/login/token.php?username=a&password=b&service=c', {timeout: 30000});
     };
         self.getUserToken = function(siteurl, username, password, service, retry) {
         retry = retry || false;
@@ -3477,9 +3568,7 @@ angular.module('mm.core')
         });
     };
         self.getSite = function(siteId) {
-        if (!siteId) {
-            return $q.reject();
-        } else if (currentSite && currentSite.getId() === siteId) {
+        if (currentSite && currentSite.getId() === siteId) {
             return $q.when(currentSite);
         } else if (typeof sites[siteId] != 'undefined') {
             return $q.when(sites[siteId]);
@@ -3496,19 +3585,17 @@ angular.module('mm.core')
             return site.getDb();
         });
     };
-        self.getSites = function(ids) {
+        self.getSites = function() {
         return $mmApp.getDB().getAll(mmCoreSitesStore).then(function(sites) {
             var formattedSites = [];
             angular.forEach(sites, function(site) {
-                if (!ids || ids.indexOf(site.id) > -1) {
-                    formattedSites.push({
-                        id: site.id,
-                        siteurl: site.siteurl,
-                        fullname: site.infos.fullname,
-                        sitename: site.infos.sitename,
-                        avatar: site.infos.userpictureurl
-                    });
-                }
+                formattedSites.push({
+                    id: site.id,
+                    siteurl: site.siteurl,
+                    fullname: site.infos.fullname,
+                    sitename: site.infos.sitename,
+                    avatar: site.infos.userpictureurl
+                });
             });
             return formattedSites;
         });
@@ -3578,40 +3665,6 @@ angular.module('mm.core')
         self.updateSiteInfoByUrl = function(siteurl, username) {
         var siteid = self.createSiteID(siteurl, username);
         return self.updateSiteInfo(siteid);
-    };
-        self.getSiteIdsFromUrl = function(url, prioritize, username) {
-        if (prioritize && currentSite && currentSite.containsUrl(url)) {
-            if (!username || currentSite.getInfo().username == username) {
-                return $q.when([currentSite.getId()]);
-            }
-        }
-        if (!url.match(/^https?:\/\//i)) {
-            if (url.match(/^[^:]{2,10}:\/\//i)) {
-                return $q.when([]);
-            } else {
-                if (currentSite) {
-                    return $q.when([currentSite.getId()]);
-                } else {
-                    return $q.when([]);
-                }
-            }
-        }
-        return $mmApp.getDB().getAll(mmCoreSitesStore).then(function(sites) {
-            var ids = [];
-            angular.forEach(sites, function(site) {
-                if (!sites[site.id]) {
-                    sites[site.id] = $mmSitesFactory.makeSite(site.id, site.siteurl, site.token, site.infos);
-                }
-                if (sites[site.id].containsUrl(url)) {
-                    if (!username || sites[site.id].getInfo().username == username) {
-                        ids.push(site.id);
-                    }
-                }
-            });
-            return ids;
-        }).catch(function() {
-            return [];
-        });
     };
     return self;
 }]);
@@ -3718,15 +3771,6 @@ angular.module('mm.core')
         url = url.replace(/.*?:\/\//g, '');
         url = url.replace(/^www./, '');
         return url;
-    };
-        self.getUsernameFromUrl = function(url) {
-        if (url.indexOf('@') > -1) {
-            var withoutProtocol = url.replace(/.*?:\/\//, ''),
-                matches = withoutProtocol.match(/[^@]*/);
-            if (matches && matches.length && !matches[0].match(/[\/|?]/)) {
-                return matches[0];
-            }
-        }
     };
     return self;
 }]);
@@ -4156,25 +4200,7 @@ angular.module('mm.core')
         };
                 self.showErrorModal = function(errorMessage, needsTranslate, autocloseTime) {
             var errorKey = 'mm.core.error',
-                langKeys = [errorKey],
-                matches;
-            if (angular.isObject(errorMessage)) {
-                if (typeof errorMessage.content != 'undefined') {
-                    errorMessage = errorMessage.content;
-                } else if (typeof errorMessage.body != 'undefined') {
-                    errorMessage = errorMessage.body;
-                } else if (typeof errorMessage.message != 'undefined') {
-                    errorMessage = errorMessage.message;
-                } else if (typeof errorMessage.error != 'undefined') {
-                    errorMessage = errorMessage.error;
-                } else {
-                    errorMessage = JSON.stringify(errorMessage);
-                }
-                matches = errorMessage.match(/token"?[=|:]"?(\w*)/, '');
-                if (matches && matches[1]) {
-                    errorMessage = errorMessage.replace(new RegExp(matches[1], 'g'), 'secret');
-                }
-            }
+                langKeys = [errorKey];
             if (needsTranslate) {
                 langKeys.push(errorMessage);
             }
@@ -4400,14 +4426,6 @@ angular.module('mm.core')
             }
             var multiplier = Math.pow(10, decimals);
             return Math.round(parseFloat(number) * multiplier) / multiplier;
-        };
-                self.extractUrlParams = function(url) {
-            var regex = /[?&]+([^=&]+)=?([^&]*)?/gi,
-                params = {};
-            url.replace(regex, function(match, key, value) {
-                params[key] = value !== undefined ? value : '';
-            });
-            return params;
         };
         return self;
     }];
@@ -4681,7 +4699,7 @@ angular.module('mm.core')
 }]);
 
 angular.module('mm.core')
-.directive('mmBrowser', ["$mmUtil", "$mmContentLinksHelper", function($mmUtil, $mmContentLinksHelper) {
+.directive('mmBrowser', ["$mmUtil", "$mmContentLinksDelegate", function($mmUtil, $mmContentLinksDelegate) {
     return {
         restrict: 'A',
         priority: 100,
@@ -4691,17 +4709,22 @@ angular.module('mm.core')
                 if (href) {
                     event.preventDefault();
                     event.stopPropagation();
-                    $mmContentLinksHelper.handleLink(href).then(function(treated) {
-                        if (!treated) {
-                           if (href.indexOf('cdvfile://') === 0 || href.indexOf('file://') === 0) {
-                                $mmUtil.openFile(href).catch(function(error) {
-                                    $mmUtil.showErrorModal(error);
-                                });
-                            } else {
-                                $mmUtil.openInBrowser(href);
+                    var actions = $mmContentLinksDelegate.getActionsFor(href);
+                    if (actions && actions.length) {
+                        for (var i = 0; i < actions.length; i++) {
+                            if (actions[i] && angular.isFunction(actions[i].action)) {
+                                actions[i].action();
+                                return;
                             }
                         }
-                    });
+                    }
+                    if (href.indexOf('cdvfile://') === 0 || href.indexOf('file://') === 0) {
+                        $mmUtil.openFile(href).catch(function(error) {
+                            $mmUtil.showErrorModal(error);
+                        });
+                    } else {
+                        $mmUtil.openInBrowser(href);
+                    }
                 }
             });
         }
@@ -5280,7 +5303,7 @@ angular.module('mm.core')
 
 angular.module('mm.core')
 .constant('mmCoreSplitViewLoad', 'mmSplitView:load')
-.directive('mmSplitView', ["$log", "$state", "$ionicPlatform", "$timeout", "$mmUtil", "$interpolate", "mmCoreSplitViewLoad", function($log, $state, $ionicPlatform, $timeout, $mmUtil, $interpolate, mmCoreSplitViewLoad) {
+.directive('mmSplitView', ["$log", "$state", "$ionicPlatform", "$timeout", "$mmUtil", "mmCoreSplitViewLoad", function($log, $state, $ionicPlatform, $timeout, $mmUtil, mmCoreSplitViewLoad) {
     $log = $log.getInstance('mmSplitView');
         function triggerClick(link) {
         if (link && link.length && link.triggerHandler) {
@@ -5304,30 +5327,16 @@ angular.module('mm.core')
                 this.getMenuState = function() {
             return menuState || $state.current.name;
         };
-                this.loadLink = function(scope, loadAttr, retrying) {
+                this.loadLink = function(retrying) {
             if ($ionicPlatform.isTablet()) {
                 if (!linkToLoad) {
-                    if (typeof loadAttr != 'undefined') {
-                        var position = parseInt(loadAttr);
-                        if (!position) {
-                            position = parseInt($interpolate(loadAttr)(scope), 10);
-                        }
-                        if (position) {
-                            var links = element.querySelectorAll('[mm-split-view-link]');
-                            position = position > links.length ? 0 : position - 1;
-                            linkToLoad = angular.element(links[position]);
-                        } else {
-                            linkToLoad = angular.element(element.querySelector('[mm-split-view-link]'));
-                        }
-                    } else {
-                        linkToLoad = angular.element(element.querySelector('[mm-split-view-link]'));
-                    }
+                    linkToLoad = angular.element(element.querySelector('[mm-split-view-link]'));
                 }
                 if (!triggerClick(linkToLoad)) {
                     if (!retrying) {
                         linkToLoad = undefined;
                         $timeout(function() {
-                            self.loadLink(scope, loadAttr, true);
+                            self.loadLink(true);
                         });
                     }
                 }
@@ -5372,23 +5381,19 @@ angular.module('mm.core')
             if (attrs.loadWhen) {
                 scope.$watch(attrs.loadWhen, function(newValue) {
                     if (newValue) {
-                        controller.loadLink(scope, attrs.load);
+                        controller.loadLink();
                     }
                 });
             } else {
-                controller.loadLink(scope, attrs.load);
+                controller.loadLink();
             }
             scope.$on('$stateChangeSuccess', function(event, toState, toParams, fromState, fromParams) {
                 if (toState.name === menuState && $mmUtil.basicLeftCompare(toParams, menuParams, 1)) {
                     controller.loadLink();
                 }
             });
-            scope.$on(mmCoreSplitViewLoad, function(e, data) {
-                if (data && data.load) {
-                    controller.loadLink(scope, data.load);
-                } else {
-                    controller.loadLink(scope, attrs.load);
-                }
+            scope.$on(mmCoreSplitViewLoad, function() {
+                controller.loadLink();
             });
         }
     };
@@ -5397,7 +5402,7 @@ angular.module('mm.core')
 angular.module('mm.core')
 .directive('mmSplitViewLink', ["$log", "$ionicPlatform", "$state", "$mmApp", function($log, $ionicPlatform, $state, $mmApp) {
     $log = $log.getInstance('mmSplitViewLink');
-    var srefRegex = new RegExp(/([^\(]*)(\((.*)\))?$/);
+    var srefRegex = new RegExp(/([^\(]*)(\(([^\)]*)\))?/);
         function createTabletState(stateName, tabletStateName, newViewName) {
         var targetState = $state.get(stateName),
             newConfig,
@@ -5472,29 +5477,6 @@ angular.module('mm.core')
     };
 }]);
 
-angular.module('mm.core.contentlinks', [])
-.config(["$stateProvider", function($stateProvider) {
-    $stateProvider
-    .state('mm_contentlinks', {
-        url: '/mm_contentlinks',
-        abstract: true,
-        templateUrl: 'core/components/contentlinks/templates/base.html',
-        cache: false,  
-    })
-    .state('mm_contentlinks.choosesite', {
-        url: '/choosesite',
-        templateUrl: 'core/components/contentlinks/templates/choosesite.html',
-        controller: 'mmContentLinksChooseSiteCtrl',
-        params: {
-            url: null
-        }
-    });
-}])
-.run(["$log", "$mmURLDelegate", "$mmContentLinksHelper", function($log, $mmURLDelegate, $mmContentLinksHelper) {
-    $log = $log.getInstance('mmContentLinks');
-    $mmURLDelegate.register('mmContentLinks', $mmContentLinksHelper.handleCustomUrl);
-}]);
-
 angular.module('mm.core.course', ['mm.core.courses'])
 .constant('mmCoreCoursePriority', 800)
 .constant('mmCoreCourseAllSectionsId', -1)
@@ -5503,9 +5485,7 @@ angular.module('mm.core.course', ['mm.core.courses'])
     .state('site.mm_course', {
         url: '/mm_course',
         params: {
-            courseid: null,
-            sid: null,
-            moduleid: null
+            courseid: null
         },
         views: {
             'site': {
@@ -5518,8 +5498,7 @@ angular.module('mm.core.course', ['mm.core.courses'])
         url: '/mm_course-section',
         params: {
             sectionid: null,
-            cid: null,
-            mid: null
+            courseid: null
         },
         views: {
             'site': {
@@ -5639,9 +5618,7 @@ angular.module('mm.core.login', [])
         templateUrl: 'core/components/login/templates/credentials.html',
         controller: 'mmLoginCredentialsCtrl',
         params: {
-            siteurl: '',
-            username: '',
-            urltoopen: ''
+            siteurl: ''
         },
         onEnter: ["$state", "$stateParams", function($state, $stateParams) {
             if (!$stateParams.siteurl) {
@@ -5678,7 +5655,7 @@ angular.module('mm.core.login', [])
             $log.warn('Forbidding state change to \'' + toState.name + '\'. App is not ready yet.');
             return;
         }
-        if (toState.name.substr(0, 8) === 'redirect' || toState.name.substr(0, 15) === 'mm_contentlinks') {
+        if (toState.name.substr(0, 8) === 'redirect') {
             return;
         } else if ((toState.name.substr(0, 8) !== 'mm_login' || toState.name === 'mm_login.reconnect') && !$mmSite.isLoggedIn()) {
             event.preventDefault();
@@ -5695,7 +5672,7 @@ angular.module('mm.core.login', [])
                 disableAnimate: true,
                 disableBack: true
             });
-            $mmLoginHelper.goToSiteInitialPage();
+            $state.transitionTo('site.mm_courses');
         }
     });
     function sessionExpired(siteid) {
@@ -5739,7 +5716,7 @@ angular.module('mm.core.login', [])
         }
         $mmLoginHelper.validateBrowserSSOLogin(url).then(function(sitedata) {
             $mmLoginHelper.handleSSOLoginAuthentication(sitedata.siteurl, sitedata.token).then(function() {
-                return $mmLoginHelper.goToSiteInitialPage();
+                $state.go('site.mm_courses');
             }, function(error) {
                 $mmUtil.showErrorModal(error);
             }).finally(function() {
@@ -5756,7 +5733,6 @@ angular.module('mm.core.login', [])
 }]);
 
 angular.module('mm.core.settings', [])
-.constant('mmCoreSettingsDownloadSection', 'mmCoreSettingsDownloadSection')
 .constant('mmCoreSettingsReportInBackground', 'mmCoreReportInBackground')
 .constant('mmCoreSettingsSyncOnlyOnWifi', 'mmCoreSyncOnlyOnWifi')
 .config(["$stateProvider", function($stateProvider) {
@@ -5850,7 +5826,7 @@ angular.module('mm.core.textviewer', [])
 
 angular.module('mm.core.user', [])
 .value('mmUserProfileState', 'site.mm_user-profile')
-.config(["$stateProvider", "$mmContentLinksDelegateProvider", function($stateProvider, $mmContentLinksDelegateProvider) {
+.config(["$stateProvider", function($stateProvider) {
     $stateProvider
         .state('site.mm_user-profile', {
             url: '/mm_user-profile',
@@ -5865,7 +5841,6 @@ angular.module('mm.core.user', [])
                 userid: 0
             }
         });
-    $mmContentLinksDelegateProvider.registerLinkHandler('mmUser', '$mmUserHandlers.linksHandler');
 }])
 .run(["$mmEvents", "mmCoreEventLogin", "mmCoreEventSiteUpdated", "$mmUserDelegate", "$mmSite", "mmCoreEventUserDeleted", "$mmUser", function($mmEvents, mmCoreEventLogin, mmCoreEventSiteUpdated, $mmUserDelegate, $mmSite, mmCoreEventUserDeleted, $mmUser) {
     $mmEvents.on(mmCoreEventLogin, $mmUserDelegate.updateProfileHandlers);
@@ -5891,301 +5866,6 @@ angular.module('mm.core.user', [])
     });
 }]);
 
-angular.module('mm.core.contentlinks')
-.controller('mmContentLinksChooseSiteCtrl', ["$scope", "$stateParams", "$mmSitesManager", "$mmUtil", "$ionicHistory", "$state", "$q", "$mmContentLinksDelegate", "$mmContentLinksHelper", function($scope, $stateParams, $mmSitesManager, $mmUtil, $ionicHistory, $state, $q,
-            $mmContentLinksDelegate, $mmContentLinksHelper) {
-    $scope.url = $stateParams.url || '';
-    var action;
-    function leaveView() {
-        $mmSitesManager.logout().finally(function() {
-            $ionicHistory.nextViewOptions({
-                disableAnimate: true,
-                disableBack: true
-            });
-            $state.go('mm_login.sites');
-        });
-    }
-    if (!$scope.url) {
-        leaveView();
-        return;
-    }
-    $mmContentLinksDelegate.getActionsFor($scope.url).then(function(actions) {
-        action = $mmContentLinksHelper.getFirstValidAction(actions);
-        if (!action) {
-            return $q.reject();
-        }
-        $mmSitesManager.getSites(action.sites).then(function(sites) {
-            $scope.sites = sites;
-        });
-    }).catch(function() {
-        $mmUtil.showErrorModal('mm.contentlinks.errornosites', true);
-        leaveView();
-    });
-    $scope.siteClicked = function(siteId) {
-        action.action(siteId);
-    };
-    $scope.cancel = function() {
-        leaveView();
-    };
-}]);
-
-angular.module('mm.core.contentlinks')
-.provider('$mmContentLinksDelegate', function() {
-    var linkHandlers = {},
-        self = {};
-        self.registerLinkHandler = function(name, handler, priority) {
-        if (typeof linkHandlers[name] !== 'undefined') {
-            console.log("$mmContentLinksDelegateProvider: Addon '" + linkHandlers[name].name +
-                        "' already registered as link handler");
-            return false;
-        }
-        console.log("$mmContentLinksDelegateProvider: Registered handler '" + name + "' as link handler.");
-        linkHandlers[name] = {
-            name: name,
-            handler: handler,
-            instance: undefined,
-            priority: typeof priority === 'undefined' ? 100 : priority
-        };
-        return true;
-    };
-    self.$get = ["$mmUtil", "$log", "$q", "$mmSitesManager", function($mmUtil, $log, $q, $mmSitesManager) {
-        var self = {};
-        $log = $log.getInstance('$mmContentLinksDelegate');
-                self.getActionsFor = function(url, courseId, username) {
-            if (!url) {
-                return $q.when([]);
-            }
-            return $mmSitesManager.getSiteIdsFromUrl(url, true, username).then(function(siteIds) {
-                var linkActions = [],
-                    promises = [];
-                angular.forEach(linkHandlers, function(handler) {
-                    if (typeof handler.instance === 'undefined') {
-                        handler.instance = $mmUtil.resolveObject(handler.handler, true);
-                    }
-                    if (handler.instance) {
-                        promises.push($q.when(handler.instance.getActions(siteIds, url, courseId)).then(function(actions) {
-                            if (actions && actions.length) {
-                                linkActions.push({
-                                    priority: handler.priority,
-                                    actions: actions
-                                });
-                            }
-                        }));
-                    }
-                });
-                return $mmUtil.allPromises(promises).catch(function() {}).then(function() {
-                    return sortActionsByPriority(linkActions);
-                });
-            });
-        };
-                self.getSiteUrl = function(url) {
-            if (!url) {
-                return;
-            }
-            for (var name in linkHandlers) {
-                var handler = linkHandlers[name];
-                if (typeof handler.instance === 'undefined') {
-                    handler.instance = $mmUtil.resolveObject(handler.handler, true);
-                }
-                if (handler.instance && handler.instance.handles) {
-                    var siteUrl = handler.instance.handles(url);
-                    if (siteUrl) {
-                        return siteUrl;
-                    }
-                }
-            }
-        };
-                function sortActionsByPriority(actions) {
-            var sorted = [];
-            actions = actions.sort(function(a, b) {
-                return a.priority > b.priority;
-            });
-            actions.forEach(function(entry) {
-                sorted = sorted.concat(entry.actions);
-            });
-            return sorted;
-        }
-        return self;
-    }];
-    return self;
-});
-
-angular.module('mm.core.contentlinks')
-.factory('$mmContentLinksHelper', ["$log", "$ionicHistory", "$state", "$mmSite", "$mmContentLinksDelegate", "$mmUtil", "$translate", "$mmCourseHelper", "$mmSitesManager", "$q", "$mmLoginHelper", "$mmText", "mmCoreConfigConstants", function($log, $ionicHistory, $state, $mmSite, $mmContentLinksDelegate, $mmUtil, $translate,
-            $mmCourseHelper, $mmSitesManager, $q, $mmLoginHelper, $mmText, mmCoreConfigConstants) {
-    $log = $log.getInstance('$mmContentLinksHelper');
-    var self = {};
-        self.filterSupportedSites = function(siteIds, isEnabledFn, checkAll) {
-        var promises = [],
-            supported = [],
-            extraParams = Array.prototype.slice.call(arguments, 3);
-        angular.forEach(siteIds, function(siteId) {
-            if (checkAll || !promises.length) {
-                promises.push(isEnabledFn.apply(isEnabledFn, [siteId].concat(extraParams)).then(function(enabled) {
-                    if (enabled) {
-                        supported.push(siteId);
-                    }
-                }));
-            }
-        });
-        return $mmUtil.allPromises(promises).catch(function() {}).then(function() {
-            if (!checkAll) {
-                if (supported.length) {
-                    return siteIds;
-                } else {
-                    return [];
-                }
-            } else {
-                return supported;
-            }
-        });
-    };
-        self.getFirstValidAction = function(actions) {
-        if (actions) {
-            for (var i = 0; i < actions.length; i++) {
-                var action = actions[i];
-                if (action && action.sites && action.sites.length && angular.isFunction(action.action)) {
-                    return action;
-                }
-            }
-        }
-    };
-        self.goInSite = function(stateName, stateParams, siteId) {
-        siteId = siteId || $mmSite.getId();
-        if (siteId == $mmSite.getId()) {
-            return $state.go(stateName, stateParams);
-        } else {
-            return $state.go('redirect', {
-                siteid: siteId,
-                state: stateName,
-                params: stateParams
-            });
-        }
-    };
-        self.goToChooseSite = function(url) {
-        $ionicHistory.nextViewOptions({
-            disableBack: true
-        });
-        return $state.go('mm_contentlinks.choosesite', {url: url});
-    };
-        self.handleCustomUrl = function(url) {
-        var contentLinksScheme = mmCoreConfigConstants.customurlscheme + '://link=';
-        if (url.indexOf(contentLinksScheme) == -1) {
-            return false;
-        }
-        $log.debug('Treating custom URL scheme: ' + url);
-        var modal = $mmUtil.showModalLoading(),
-            username;
-        url = url.replace(contentLinksScheme, '');
-        username = $mmText.getUsernameFromUrl(url);
-        if (username) {
-            url = url.replace(username + '@', '');
-        }
-        $mmSitesManager.getSiteIdsFromUrl(url, false, username).then(function(siteIds) {
-            if (siteIds.length) {
-                modal.dismiss();
-                return self.handleLink(url, username).then(function(treated) {
-                    if (!treated) {
-                        $mmUtil.showErrorModal('mm.contentlinks.errornoactions', true);
-                    }
-                });
-            } else {
-                var siteUrl = $mmContentLinksDelegate.getSiteUrl(url),
-                    formatted = $mmUtil.formatURL(siteUrl);
-                if (!siteUrl || !$mmUtil.isValidURL(formatted)) {
-                    $mmUtil.showErrorModal('mm.login.invalidsite', true);
-                    return;
-                }
-                return $mmSitesManager.checkSite(siteUrl).then(function(result) {
-                    var promise,
-                        ssoNeeded = $mmLoginHelper.isSSOLoginNeeded(result.code);
-                    modal.dismiss();
-                    if (!$mmSite.isLoggedIn()) {
-                        if (ssoNeeded) {
-                            promise = $mmUtil.showConfirm($translate('mm.login.logininsiterequired'));
-                        } else {
-                            promise = $q.when();
-                        }
-                    } else {
-                        promise = $mmUtil.showConfirm($translate('mm.contentlinks.confirmurlothersite')).then(function() {
-                            if (!ssoNeeded) {
-                                return $mmSitesManager.logout().catch(function() {
-                                });
-                            }
-                        });
-                    }
-                    return promise.then(function() {
-                        if (ssoNeeded) {
-                            $mmLoginHelper.openBrowserForSSOLogin(result.siteurl);
-                        } else {
-                            $state.go('mm_login.credentials', {
-                                siteurl: result.siteurl,
-                                username: username,
-                                urltoopen: url
-                            });
-                        }
-                    });
-                }, function(error) {
-                    $mmUtil.showErrorModal(error);
-                });
-            }
-        }).finally(function() {
-            modal.dismiss();
-        });
-        return true;
-    };
-        self.handleLink = function(url, username) {
-        return $mmContentLinksDelegate.getActionsFor(url, undefined, username).then(function(actions) {
-            var action = self.getFirstValidAction(actions);
-            if (action) {
-                if (!$mmSite.isLoggedIn()) {
-                    if (action.sites.length == 1) {
-                        action.action(action.sites[0]);
-                    } else {
-                        self.goToChooseSite(url);
-                    }
-                } else if (action.sites.length == 1 && action.sites[0] == $mmSite.getId()) {
-                    action.action(action.sites[0]);
-                } else {
-                    $mmUtil.showConfirm($translate('mm.contentlinks.confirmurlothersite')).then(function() {
-                        if (action.sites.length == 1) {
-                            action.action(action.sites[0]);
-                        } else {
-                            self.goToChooseSite(url);
-                        }
-                    });
-                }
-                return true;
-            }
-            return false;
-        }).catch(function() {
-            return false;
-        });
-    };
-        self.treatModuleIndexUrl = function(siteIds, url, isEnabled, courseId) {
-        var params = $mmUtil.extractUrlParams(url);
-        if (typeof params.id != 'undefined') {
-            courseId = courseId || params.courseid || params.cid;
-            return self.filterSupportedSites(siteIds, isEnabled, false, courseId).then(function(ids) {
-                if (!ids.length) {
-                    return [];
-                } else {
-                    return [{
-                        message: 'mm.core.view',
-                        icon: 'ion-eye',
-                        sites: ids,
-                        action: function(siteId) {
-                            $mmCourseHelper.navigateToModule(parseInt(params.id, 10), siteId, courseId);
-                        }
-                    }];
-                }
-            });
-        }
-        return $q.when([]);
-    };
-    return self;
-}]);
-
 angular.module('mm.core.course')
 .controller('mmCourseModContentCtrl', ["$log", "$stateParams", "$scope", function($log, $stateParams, $scope) {
     $log = $log.getInstance('mmCourseModContentCtrl');
@@ -6196,14 +5876,13 @@ angular.module('mm.core.course')
 }]);
 
 angular.module('mm.core.course')
-.controller('mmCourseSectionCtrl', ["$mmCourseDelegate", "$mmCourse", "$mmUtil", "$scope", "$stateParams", "$translate", "$mmSite", "$mmEvents", "$ionicScrollDelegate", "$mmCourses", "$q", "mmCoreEventCompletionModuleViewed", "$controller", function($mmCourseDelegate, $mmCourse, $mmUtil, $scope, $stateParams, $translate, $mmSite,
-            $mmEvents, $ionicScrollDelegate, $mmCourses, $q, mmCoreEventCompletionModuleViewed, $controller) {
-    var courseId = $stateParams.cid || 1,
-        sectionId = $stateParams.sectionid || -1,
-        moduleId = $stateParams.mid;
-    $scope.sitehome = (courseId === 1);
+.controller('mmCourseSectionCtrl', ["$mmCourseDelegate", "$mmCourse", "$mmUtil", "$scope", "$stateParams", "$translate", "$mmSite", "$mmEvents", "$ionicScrollDelegate", "$mmCourses", "$q", "mmCoreEventCompletionModuleViewed", function($mmCourseDelegate, $mmCourse, $mmUtil, $scope, $stateParams, $translate, $mmSite,
+            $mmEvents, $ionicScrollDelegate, $mmCourses, $q, mmCoreEventCompletionModuleViewed) {
+    var courseid = $stateParams.courseid || 1,
+        sectionid = $stateParams.sectionid || -1;
+    $scope.sitehome = (courseid === 1);
     $scope.sections = [];
-    if (sectionId < 0) {
+    if (sectionid < 0) {
         if ($scope.sitehome) {
             $scope.title = $translate.instant('mma.frontpage.sitehome');
         } else {
@@ -6211,26 +5890,26 @@ angular.module('mm.core.course')
         }
         $scope.summary = null;
     }
-    function loadContent(sectionId) {
-        return $mmCourses.getUserCourse(courseId, true).catch(function() {
+    function loadContent(sectionid) {
+        return $mmCourses.getUserCourse(courseid, true).catch(function() {
         }).then(function(course) {
             var promise;
             if (course && course.enablecompletion === false) {
                 promise = $q.when([]);
             } else {
-                promise = $mmCourse.getActivitiesCompletionStatus(courseId).catch(function() {
+                promise = $mmCourse.getActivitiesCompletionStatus(courseid).catch(function() {
                     return [];
                 });
             }
             return promise.then(function(statuses) {
                 var promise,
                     sectionnumber;
-                if (sectionId < 0) {
+                if (sectionid < 0) {
                     sectionnumber = 0;
-                    promise = $mmCourse.getSections(courseId);
+                    promise = $mmCourse.getSections(courseid);
                 } else {
-                    sectionnumber = sectionId;
-                    promise = $mmCourse.getSection(courseId, sectionId).then(function(section) {
+                    sectionnumber = sectionid;
+                    promise = $mmCourse.getSection(courseid, sectionid).then(function(section) {
                         $scope.title = section.name;
                         $scope.summary = section.summary;
                         return [section];
@@ -6247,24 +5926,17 @@ angular.module('mm.core.course')
                         }
                         angular.forEach(section.modules, function(module) {
                             module._controller =
-                                    $mmCourseDelegate.getContentHandlerControllerFor(module.modname, module, courseId, section.id);
+                                    $mmCourseDelegate.getContentHandlerControllerFor(module.modname, module, courseid, section.id);
                             var status = statuses[module.id];
                             if (typeof status != 'undefined') {
                                 module.completionstatus = status;
-                            }
-                            if (module.id == moduleId) {
-                                var scope = $scope.$new();
-                                $controller(module._controller, {$scope: scope});
-                                if (scope.action) {
-                                    scope.action();
-                                }
                             }
                         });
                     });
                     $scope.sections = sections;
                     $scope.hasContent = hasContent;
                     $mmSite.write('core_course_view_course', {
-                        courseid: courseId,
+                        courseid: courseid,
                         sectionnumber: sectionnumber
                     });
                 }, function(error) {
@@ -6277,12 +5949,12 @@ angular.module('mm.core.course')
             });
         });
     }
-    loadContent(sectionId).finally(function() {
+    loadContent(sectionid).finally(function() {
         $scope.sectionLoaded = true;
     });
     $scope.doRefresh = function() {
-        $mmCourse.invalidateSections(courseId).finally(function() {
-            loadContent(sectionId).finally(function() {
+        $mmCourse.invalidateSections(courseid).finally(function() {
+            loadContent(sectionid).finally(function() {
                 $scope.$broadcast('scroll.refreshComplete');
             });
         });
@@ -6294,18 +5966,18 @@ angular.module('mm.core.course')
         }
         $scope.sectionLoaded = false;
         $scope.sections = [];
-        loadContent(sectionId).finally(function() {
+        loadContent(sectionid).finally(function() {
             $scope.sectionLoaded = true;
             $scope.loadingPaddingTop = 0;
         });
     }
     $scope.completionChanged = function() {
-        $mmCourse.invalidateSections(courseId).finally(function() {
+        $mmCourse.invalidateSections(courseid).finally(function() {
             refreshAfterCompletionChange();
         });
     };
     var observer = $mmEvents.on(mmCoreEventCompletionModuleViewed, function(cid) {
-        if (cid === courseId) {
+        if (cid === courseid) {
             refreshAfterCompletionChange();
         }
     });
@@ -6317,48 +5989,36 @@ angular.module('mm.core.course')
 }]);
 
 angular.module('mm.core.course')
-.controller('mmCourseSectionsCtrl', ["$mmCourse", "$mmUtil", "$scope", "$stateParams", "$translate", "$mmCourseHelper", "$mmEvents", "$mmSite", "$mmCoursePrefetchDelegate", "$mmCourses", "$q", "$ionicHistory", "$ionicPlatform", "mmCoreCourseAllSectionsId", "mmCoreEventSectionStatusChanged", "$mmConfig", "mmCoreSettingsDownloadSection", "$state", "$timeout", function($mmCourse, $mmUtil, $scope, $stateParams, $translate, $mmCourseHelper, $mmEvents,
+.controller('mmCourseSectionsCtrl', ["$mmCourse", "$mmUtil", "$scope", "$stateParams", "$translate", "$mmCourseHelper", "$mmEvents", "$mmSite", "$mmCoursePrefetchDelegate", "$mmCourses", "$q", "$ionicHistory", "$ionicPlatform", "mmCoreCourseAllSectionsId", "mmCoreEventSectionStatusChanged", function($mmCourse, $mmUtil, $scope, $stateParams, $translate, $mmCourseHelper, $mmEvents,
             $mmSite, $mmCoursePrefetchDelegate, $mmCourses, $q, $ionicHistory, $ionicPlatform, mmCoreCourseAllSectionsId,
-            mmCoreEventSectionStatusChanged, $mmConfig, mmCoreSettingsDownloadSection, $state, $timeout) {
-    var courseId = $stateParams.courseid,
-        sectionId = $stateParams.sid,
-        moduleId = $stateParams.moduleid,
-        downloadSectionsEnabled;
-    $scope.courseId = courseId;
-    $scope.sectionToLoad = 2;
-    function checkDownloadSectionsEnabled() {
-        return $mmConfig.get(mmCoreSettingsDownloadSection, true).then(function(enabled) {
-            downloadSectionsEnabled = enabled;
-        }).catch(function() {
-            downloadSectionsEnabled = false;
-        });
-    }
+            mmCoreEventSectionStatusChanged) {
+    var courseid = $stateParams.courseid;
+    $scope.courseid = courseid;
     function loadSections(refresh) {
-        return $mmCourses.getUserCourse(courseId).then(function(course) {
+        return $mmCourses.getUserCourse(courseid).then(function(course) {
             $scope.fullname = course.fullname;
-            return $mmCourse.getSections(courseId).then(function(sections) {
+            return $mmCourse.getSections(courseid).then(function(sections) {
                 return $translate('mm.course.allsections').then(function(str) {
                     var result = [{
                         name: str,
                         id: mmCoreCourseAllSectionsId
                     }].concat(sections);
-                    $scope.sections = result;
-                    if (downloadSectionsEnabled) {
-                        return $mmCourseHelper.calculateSectionsStatus(result, courseId, true, refresh).catch(function() {
-                        }).then(function(downloadpromises) {
-                            if (downloadpromises && downloadpromises.length) {
-                                $mmUtil.allPromises(downloadpromises).catch(function() {
-                                    if (!$scope.$$destroyed) {
-                                        $mmUtil.showErrorModal('mm.course.errordownloadingsection', true);
-                                    }
-                                }).finally(function() {
-                                    if (!$scope.$$destroyed) {
-                                        $mmCourseHelper.calculateSectionsStatus($scope.sections, courseId, false);
-                                    }
-                                });
-                            }
-                        });
-                    }
+                    return $mmCourseHelper.calculateSectionsStatus(result, courseid, true, refresh).catch(function() {
+                    }).then(function(downloadpromises) {
+                        if (downloadpromises && downloadpromises.length) {
+                            $mmUtil.allPromises(downloadpromises).catch(function() {
+                                if (!$scope.$$destroyed) {
+                                    $mmUtil.showErrorModal('mm.course.errordownloadingsection', true);
+                                }
+                            }).finally(function() {
+                                if (!$scope.$$destroyed) {
+                                    $mmCourseHelper.calculateSectionsStatus($scope.sections, courseid, false);
+                                }
+                            });
+                        }
+                    }).finally(function() {
+                        $scope.sections = result;
+                    });
                 });
             });
         }).catch(function(error) {
@@ -6370,7 +6030,7 @@ angular.module('mm.core.course')
         });
     }
     function prefetch(section, manual) {
-        $mmCourseHelper.prefetch(section, courseId, $scope.sections).catch(function() {
+        $mmCourseHelper.prefetch(section, courseid, $scope.sections).catch(function() {
             if ($scope.$$destroyed) {
                 return;
             }
@@ -6383,35 +6043,14 @@ angular.module('mm.core.course')
             $mmUtil.showErrorModal('mm.course.errordownloadingsection', true);
         }).finally(function() {
             if (!$scope.$$destroyed) {
-                $mmCourseHelper.calculateSectionsStatus($scope.sections, courseId, false);
+                $mmCourseHelper.calculateSectionsStatus($scope.sections, courseid, false);
             }
         });
-    }
-    function autoloadSection() {
-        if (sectionId) {
-            if ($ionicPlatform.isTablet()) {
-                angular.forEach($scope.sections, function(section, index) {
-                    if (section.id == sectionId) {
-                        $scope.sectionToLoad = index + 1;
-                    }
-                });
-                $scope.moduleId = moduleId;
-                $timeout(function() {
-                    $scope.moduleId = null;
-                }, 500);
-            } else {
-                $state.go('site.mm_course-section', {
-                    sectionid: sectionId,
-                    cid: courseId,
-                    mid: moduleId
-                });
-            }
-        }
     }
     $scope.doRefresh = function() {
         var promises = [];
         promises.push($mmCourses.invalidateUserCourses());
-        promises.push($mmCourse.invalidateSections(courseId));
+        promises.push($mmCourse.invalidateSections(courseid));
         $q.all(promises).finally(function() {
             loadSections(true).finally(function() {
                 $scope.$broadcast('scroll.refreshComplete');
@@ -6421,23 +6060,19 @@ angular.module('mm.core.course')
     $scope.prefetch = function(e, section) {
         e.preventDefault();
         e.stopPropagation();
-        $mmCourseHelper.confirmDownloadSize(courseId, section, $scope.sections).then(function() {
+        $mmCourseHelper.confirmDownloadSize(courseid, section, $scope.sections).then(function() {
             prefetch(section, true);
         });
     };
-    checkDownloadSectionsEnabled().then(function() {
-        loadSections().finally(function() {
-            autoloadSection();
-            $scope.sectionsLoaded = true;
-        });
+    loadSections().finally(function() {
+        $scope.sectionsLoaded = true;
     });
     var statusObserver = $mmEvents.on(mmCoreEventSectionStatusChanged, function(data) {
-        if (downloadSectionsEnabled && $scope.sections && $scope.sections.length && data.siteid === $mmSite.getId() &&
-                    !$scope.$$destroyed&& data.sectionid) {
+        if ($scope.sections && $scope.sections.length && data.siteid === $mmSite.getId() && !$scope.$$destroyed && data.sectionid) {
             if ($mmCoursePrefetchDelegate.isBeingDownloaded($mmCourseHelper.getSectionDownloadId({id: data.sectionid}))) {
                 return;
             }
-            $mmCourseHelper.calculateSectionsStatus($scope.sections, courseId, false).then(function() {
+            $mmCourseHelper.calculateSectionsStatus($scope.sections, courseid, false).then(function() {
                 var section;
                 angular.forEach($scope.sections, function(s) {
                     if (s.id === data.sectionid) {
@@ -6517,7 +6152,7 @@ angular.module('mm.core.course')
     ];
     $mmSitesFactoryProvider.registerStores(stores);
 }])
-.factory('$mmCourse', ["$mmSite", "$translate", "$q", "$log", "$mmEvents", "$mmSitesManager", "mmCoreEventCompletionModuleViewed", function($mmSite, $translate, $q, $log, $mmEvents, $mmSitesManager, mmCoreEventCompletionModuleViewed) {
+.factory('$mmCourse', ["$mmSite", "$translate", "$q", "$log", "$mmEvents", "mmCoreEventCompletionModuleViewed", function($mmSite, $translate, $q, $log, $mmEvents, mmCoreEventCompletionModuleViewed) {
     $log = $log.getInstance('$mmCourse');
     var self = {},
         mods = ["assign", "assignment", "book", "chat", "choice", "data", "database", "date", "external-tool",
@@ -6531,18 +6166,6 @@ angular.module('mm.core.course')
         }
         return module;
     }
-        self.canGetModuleWithoutCourseId = function(siteId) {
-        siteId = siteId || $mmSite.getId();
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            return site.wsAvailable('core_course_get_course_module');
-        });
-    };
-        self.canGetModuleByInstance = function(siteId) {
-        siteId = siteId || $mmSite.getId();
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            return site.wsAvailable('core_course_get_course_module_by_instance');
-        });
-    };
         self.checkModuleCompletion = function(courseId, completion) {
         if (completion && completion.tracking === 2 && completion.state === 0) {
             self.invalidateSections(courseId).finally(function() {
@@ -6574,97 +6197,44 @@ angular.module('mm.core.course')
         function getActivitiesCompletionCacheKey(courseid, userid) {
         return 'mmCourse:activitiescompletion:' + courseid + ':' + userid;
     }
-        self.getModuleBasicInfo = function(moduleId, siteId) {
-        siteId = siteId || $mmSite.getId();
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            var params = {
-                    cmid: moduleId
-                },
-                preSets = {
-                    cacheKey: getModuleCacheKey(moduleId)
-                };
-            return site.read('core_course_get_course_module', params, preSets).then(function(response) {
-                if (response.cm && (!response.warnings || !response.warnings.length)) {
-                    return response.cm;
-                }
-                return $q.reject();
-            });
-        });
-    };
-        self.getModuleBasicInfoByInstance = function(id, module, siteId) {
-        siteId = siteId || $mmSite.getId();
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            var params = {
-                    instance: id,
-                    module: module
-                },
-                preSets = {
-                    cacheKey: getModuleByInstanceCacheKey(id, module)
-                };
-            return site.read('core_course_get_course_module_by_instance', params, preSets).then(function(response) {
-                if (response.cm && (!response.warnings || !response.warnings.length)) {
-                    return response.cm;
-                }
-                return $q.reject();
-            });
-        });
-    };
-        self.getModule = function(moduleId, courseId, sectionId) {
-        if (!moduleId) {
+        self.getModule = function(courseid, moduleid, sectionid) {
+        if (!moduleid) {
             return $q.reject();
         }
-        var promise;
-        if (!courseId) {
-            promise = self.getModuleBasicInfo(moduleId).then(function(module) {
-                return module.course;
-            });
-        } else {
-            promise = $q.when(courseId);
-        }
-        return promise.then(function(courseId) {
-            $log.debug('Getting module ' + moduleId + ' in course ' + courseId);
-            params = {
-                courseid: courseId,
+        $log.debug('Getting module ' + moduleid + ' in course ' + courseid + ' and section ' +sectionid);
+        var params = {
+                courseid: courseid,
                 options: [
                     {
                         name: 'cmid',
-                        value: moduleId
+                        value: moduleid
                     }
                 ]
-            };
+            },
             preSets = {
-                cacheKey: getModuleCacheKey(moduleId)
+                cacheKey: getModuleCacheKey(moduleid)
             };
-            if (sectionId) {
-                params.options.push({
-                    name: 'sectionid',
-                    value: sectionId
-                });
-            }
-            return $mmSite.read('core_course_get_contents', params, preSets).catch(function() {
-                params.options = [];
-                preSets.cacheKey = getSectionsCacheKey(courseId);
-                return $mmSite.read('core_course_get_contents', params, preSets);
-            }).then(function(sections) {
-                var section,
-                    module;
-                for (var i = 0; i < sections.length; i++) {
-                    section = sections[i];
-                    for (var j = 0; j < section.modules.length; j++) {
-                        module = section.modules[j];
-                        if (module.id == moduleId) {
-                            module.course = courseId;
-                            return addContentsIfNeeded(module);
-                        }
+        if (sectionid) {
+            params.options.push({
+                name: 'sectionid',
+                value: sectionid
+            });
+        }
+        return $mmSite.read('core_course_get_contents', params, preSets).then(function(sections) {
+            var section,
+                module;
+            for (var i = 0; i < sections.length; i++) {
+                section = sections[i];
+                for (var j = 0; j < section.modules.length; j++) {
+                    module = section.modules[j];
+                    if (module.id === moduleid) {
+                        return addContentsIfNeeded(module);
                     }
                 }
-                return $q.reject();
-            });
+            }
+            return $q.reject();
         });
     };
-        function getModuleByInstanceCacheKey(id, module) {
-        return 'mmCourse:moduleByInstance:' + module + ':' + id;
-    }
         function getModuleCacheKey(moduleid) {
         return 'mmCourse:module:' + moduleid;
     }
@@ -6673,29 +6243,6 @@ angular.module('mm.core.course')
             moduleName = "external-tool";
         }
         return "img/mod/" + moduleName + ".svg";
-    };
-        self.getModuleSectionId = function(moduleId, courseId, siteId) {
-        if (!moduleId) {
-            return $q.reject();
-        }
-        return self.getModuleBasicInfo(moduleId, siteId).then(function(module) {
-            return module.section;
-        }).catch(function() {
-            if (!courseId) {
-                return $q.reject();
-            }
-            return self.getSections(courseId, {}, siteId).then(function(sections) {
-                for (var i = 0, seclen = sections.length; i < seclen; i++) {
-                    var section = sections[i];
-                    for (var j = 0, modlen = section.modules.length; j < modlen; j++) {
-                        if (section.modules[j].id == moduleId) {
-                            return section.id;
-                        }
-                    }
-                }
-                return $q.reject();
-            });
-        });
     };
         self.getSection = function(courseid, sectionid) {
         var deferred = $q.defer();
@@ -6716,22 +6263,19 @@ angular.module('mm.core.course')
         });
         return deferred.promise;
     };
-        self.getSections = function(courseid, preSets, siteId) {
+        self.getSections = function(courseid, preSets) {
         preSets = preSets || {};
-        siteId = siteId || $mmSite.getId();
         preSets.cacheKey = getSectionsCacheKey(courseid);
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            return site.read('core_course_get_contents', {
-                courseid: courseid,
-                options: []
-            }, preSets).then(function(sections) {
-                angular.forEach(sections, function(section) {
-                    angular.forEach(section.modules, function(module) {
-                        addContentsIfNeeded(module);
-                    });
+        return $mmSite.read('core_course_get_contents', {
+            courseid: courseid,
+            options: []
+        }, preSets).then(function(sections) {
+            angular.forEach(sections, function(section) {
+                angular.forEach(section.modules, function(module) {
+                    addContentsIfNeeded(module);
                 });
-                return sections;
             });
+            return sections;
         });
     };
         function getSectionsCacheKey(courseid) {
@@ -6739,9 +6283,6 @@ angular.module('mm.core.course')
     }
         self.invalidateModule = function(moduleid) {
         return $mmSite.invalidateWsCacheForKey(getModuleCacheKey(moduleid));
-    };
-        self.invalidateModuleByInstance = function(id, module) {
-        return $mmSite.invalidateWsCacheForKey(getModuleByInstanceCacheKey(id, module));
     };
         self.invalidateSections = function(courseid, userid) {
         userid = userid || $mmSite.getUserId();
@@ -6850,8 +6391,9 @@ angular.module('mm.core.course')
 });
 
 angular.module('mm.core.course')
-.factory('$mmCourseHelper', ["$q", "$mmCoursePrefetchDelegate", "$mmFilepool", "$mmUtil", "$mmCourse", "$mmSite", "$state", "mmCoreNotDownloaded", "mmCoreOutdated", "mmCoreDownloading", "mmCoreCourseAllSectionsId", function($q, $mmCoursePrefetchDelegate, $mmFilepool, $mmUtil, $mmCourse, $mmSite, $state,
-            mmCoreNotDownloaded, mmCoreOutdated, mmCoreDownloading, mmCoreCourseAllSectionsId) {
+.factory('$mmCourseHelper', ["$q", "$mmCoursePrefetchDelegate", "$mmApp", "$mmFilepool", "$mmUtil", "$translate", "$mmText", "mmCoreNotDownloaded", "mmCoreOutdated", "mmCoreDownloading", "mmCoreWifiDownloadThreshold", "mmCoreDownloadThreshold", "mmCoreCourseAllSectionsId", function($q, $mmCoursePrefetchDelegate, $mmApp, $mmFilepool, $mmUtil, $translate, $mmText,
+            mmCoreNotDownloaded, mmCoreOutdated, mmCoreDownloading, mmCoreWifiDownloadThreshold, mmCoreDownloadThreshold,
+            mmCoreCourseAllSectionsId) {
     var self = {};
         self.calculateSectionStatus = function(section, courseid, restoreDownloads, refresh, dwnpromises) {
         if (section.id !== mmCoreCourseAllSectionsId) {
@@ -6930,61 +6472,8 @@ angular.module('mm.core.course')
             return $mmUtil.confirmDownloadSize(size);
         });
     };
-        self.getModuleCourseIdByInstance = function(id, module, siteId) {
-        return $mmCourse.getModuleBasicInfoByInstance(id, module, siteId).then(function(cm) {
-            return cm.course;
-        }).catch(function(error) {
-            if (error) {
-                $mmUtil.showErrorModal(error);
-            } else {
-                $mmUtil.showErrorModal('mm.course.errorgetmodule', true);
-            }
-            return $q.reject();
-        });
-    };
         self.getSectionDownloadId = function(section) {
         return 'Section-'+section.id;
-    };
-        self.navigateToModule = function(moduleId, siteId, courseId, sectionId) {
-        siteId = siteId || $mmSite.getId();
-        var modal = $mmUtil.showModalLoading(),
-            promise;
-        return $mmCourse.canGetModuleWithoutCourseId(siteId).then(function(enabled) {
-            if (courseId && sectionId) {
-                promise = $q.when();
-            } else if (!courseId && !enabled) {
-                promise = $q.reject();
-            } else if (!courseId) {
-                promise = $mmCourse.getModuleBasicInfo(moduleId, siteId).then(function(module) {
-                    courseId = module.course;
-                    sectionId = module.section;
-                });
-            } else {
-                promise = $mmCourse.getModuleSectionId(moduleId, courseId, siteId).then(function(id) {
-                    sectionId = id;
-                });
-            }
-            return promise.then(function() {
-                return $state.go('redirect', {
-                    siteid: siteId,
-                    state: 'site.mm_course',
-                    params: {
-                        courseid: courseId,
-                        moduleid: moduleId,
-                        sid: sectionId
-                    }
-                });
-            });
-        }).catch(function(error) {
-            if (error) {
-                $mmUtil.showErrorModal(error);
-            } else {
-                $mmUtil.showErrorModal('mm.course.errorgetmodule', true);
-            }
-            return $q.reject();
-        }).finally(function() {
-            modal.dismiss();
-        });
     };
         self.prefetch = function(section, courseid, sections) {
         if (section.id != mmCoreCourseAllSectionsId) {
@@ -7849,8 +7338,7 @@ angular.module('mm.core.courses')
 });
 
 angular.module('mm.core.courses')
-.factory('$mmCoursesHandlers', ["$mmSite", "$state", "$mmCourses", "$q", "$mmUtil", "$translate", "$timeout", "mmCoursesEnrolInvalidKey", function($mmSite, $state, $mmCourses, $q, $mmUtil, $translate, $timeout,
-            mmCoursesEnrolInvalidKey) {
+.factory('$mmCoursesHandlers', ["$mmSite", "$state", "$mmCourses", "$q", "$mmUtil", "$translate", "$timeout", "mmCoursesEnrolInvalidKey", function($mmSite, $state, $mmCourses, $q, $mmUtil, $translate, $timeout, mmCoursesEnrolInvalidKey) {
     var self = {};
         self.linksHandler = function() {
         var self = {};
@@ -7879,11 +7367,7 @@ angular.module('mm.core.courses')
                 });
             }).then(function() {
                 modal.dismiss();
-                $state.go('redirect', {
-                    siteid: $mmSite.getId(),
-                    state: 'site.mm_course',
-                    params: {courseid: courseId}
-                });
+                $state.go('site.mm_course', {courseid: parseInt(courseId)});
             });
         }
                 function canSelfEnrol(courseId) {
@@ -7930,39 +7414,26 @@ angular.module('mm.core.courses')
                 }
             });
         }
-                self.getActions = function(siteIds, url) {
-            if (typeof self.handles(url) != 'undefined') {
-                var params = $mmUtil.extractUrlParams(url);
-                if (typeof params.id != 'undefined') {
-                    return [{
-                        message: 'mm.core.view',
-                        icon: 'ion-eye',
-                        sites: siteIds,
-                        action: function(siteId) {
-                            siteId = siteId || $mmSite.getId();
-                            if (siteId == $mmSite.getId()) {
-                                actionEnrol(parseInt(params.id, 10), url);
-                            } else {
-                                $state.go('redirect', {
-                                    siteid: siteId,
-                                    state: 'site.mm_course',
-                                    params: {courseid: parseInt(params.id, 10)}
-                                });
+                self.isEnabled = function() {
+            return true;
+        };
+                self.getActions = function(url, courseId) {
+            if ($mmSite.containsUrl(url)) {
+                if (url.indexOf('enrol/index.php') > -1 || url.indexOf('course/enrol.php') > -1) {
+                    var matches = url.match(/\.php\?id=(\d*)/);
+                    if (matches && typeof matches[1] != 'undefined') {
+                        courseId = matches[1];
+                        return [{
+                            message: 'mm.core.view',
+                            icon: 'ion-eye',
+                            action: function() {
+                                actionEnrol(courseId, url);
                             }
-                        }
-                    }];
+                        }];
+                    }
                 }
             }
             return [];
-        };
-                self.handles = function(url) {
-            var patterns = ['/enrol/index.php', '/course/enrol.php', '/course/view.php'];
-            for (var i = 0; i < patterns.length; i++) {
-                var position = url.indexOf(patterns[i]);
-                if (position > -1) {
-                    return url.substr(0, position);
-                }
-            }
         };
         return self;
     };
@@ -7970,14 +7441,11 @@ angular.module('mm.core.courses')
 }]);
 
 angular.module('mm.core.login')
-.controller('mmLoginCredentialsCtrl', ["$scope", "$state", "$stateParams", "$mmSitesManager", "$mmUtil", "$ionicHistory", "$mmApp", "$q", "$mmLoginHelper", "$translate", "$mmContentLinksDelegate", "$mmContentLinksHelper", function($scope, $state, $stateParams, $mmSitesManager, $mmUtil, $ionicHistory, $mmApp,
-            $q, $mmLoginHelper, $translate, $mmContentLinksDelegate, $mmContentLinksHelper) {
+.controller('mmLoginCredentialsCtrl', ["$scope", "$state", "$stateParams", "$mmSitesManager", "$mmUtil", "$ionicHistory", "$mmApp", "$q", "$mmLoginHelper", "$translate", function($scope, $state, $stateParams, $mmSitesManager, $mmUtil, $ionicHistory, $mmApp,
+            $q, $mmLoginHelper, $translate) {
     $scope.siteurl = $stateParams.siteurl;
-    $scope.credentials = {
-        username: $stateParams.username
-    };
-    var siteChecked = false,
-        urlToOpen = $stateParams.urltoopen;
+    $scope.credentials = {};
+    var siteChecked = false;
     function checkSite(siteurl) {
         var checkmodal = $mmUtil.showModalLoading();
         return $mmSitesManager.checkSite(siteurl).then(function(result) {
@@ -8033,18 +7501,7 @@ angular.module('mm.core.login')
             return $mmSitesManager.newSite(data.siteurl, data.token).then(function() {
                 delete $scope.credentials;
                 $ionicHistory.nextViewOptions({disableBack: true});
-                if (urlToOpen) {
-                    return $mmContentLinksDelegate.getActionsFor(urlToOpen, undefined, username).then(function(actions) {
-                        action = $mmContentLinksHelper.getFirstValidAction(actions);
-                        if (action && action.sites.length) {
-                            action.action(action.sites[0]);
-                        } else {
-                            return $mmLoginHelper.goToSiteInitialPage();
-                        }
-                    });
-                } else {
-                    return $mmLoginHelper.goToSiteInitialPage();
-                }
+                $state.go('site.mm_courses');
             });
         }).catch(function(error) {
             $mmUtil.showErrorModal(error);
@@ -8063,7 +7520,7 @@ angular.module('mm.core.login')
             disableBack: true
         });
         if ($mmSite.isLoggedIn()) {
-            $mmLoginHelper.goToSiteInitialPage();
+            $state.go('site.mm_courses');
         } else {
             $mmSitesManager.hasSites().then(function() {
                 return $state.go('mm_login.sites');
@@ -8075,8 +7532,7 @@ angular.module('mm.core.login')
 }]);
 
 angular.module('mm.core.login')
-.controller('mmLoginReconnectCtrl', ["$scope", "$state", "$stateParams", "$mmSitesManager", "$mmApp", "$mmUtil", "$ionicHistory", "$mmLoginHelper", function($scope, $state, $stateParams, $mmSitesManager, $mmApp, $mmUtil, $ionicHistory,
-            $mmLoginHelper) {
+.controller('mmLoginReconnectCtrl', ["$scope", "$state", "$stateParams", "$mmSitesManager", "$mmApp", "$mmUtil", "$ionicHistory", function($scope, $state, $stateParams, $mmSitesManager, $mmApp, $mmUtil, $ionicHistory) {
     var infositeurl = $stateParams.infositeurl;
     $scope.siteurl = $stateParams.siteurl;
     $scope.credentials = {
@@ -8107,7 +7563,7 @@ angular.module('mm.core.login')
                 $mmSitesManager.updateSiteInfoByUrl(infositeurl, username).finally(function() {
                     delete $scope.credentials;
                     $ionicHistory.nextViewOptions({disableBack: true});
-                    return $mmLoginHelper.goToSiteInitialPage();
+                    $state.go('site.mm_courses');
                 });
             }, function(error) {
                 $mmUtil.showErrorModal('mm.login.errorupdatesite', true);
@@ -8151,7 +7607,7 @@ angular.module('mm.core.login')
             $mmSitesManager.getUserToken(sitedata.url, sitedata.username, sitedata.password).then(function(data) {
                 $mmSitesManager.newSite(data.siteurl, data.token).then(function() {
                     $ionicHistory.nextViewOptions({disableBack: true});
-                    return $mmLoginHelper.goToSiteInitialPage();
+                    $state.go('site.mm_courses');
                 }, function(error) {
                     $mmUtil.showErrorModal(error);
                 }).finally(function() {
@@ -8236,7 +7692,7 @@ angular.module('mm.core.login')
         var modal = $mmUtil.showModalLoading();
         $mmSitesManager.loadSite(siteid).then(function() {
             $ionicHistory.nextViewOptions({disableBack: true});
-            return $mmLoginHelper.goToSiteInitialPage();
+            $state.go('site.mm_courses');
         }, function(error) {
             $log.error('Error loading site '+siteid);
             error = error || 'Error loading site.';
@@ -8254,8 +7710,8 @@ angular.module('mm.core.login')
 .constant('mmLoginSSOCode', 2)
 .constant('mmLoginLaunchSiteURL', 'mmLoginLaunchSiteURL')
 .constant('mmLoginLaunchPassport', 'mmLoginLaunchPassport')
-.factory('$mmLoginHelper', ["$q", "$log", "$mmConfig", "mmLoginSSOCode", "mmLoginLaunchSiteURL", "mmLoginLaunchPassport", "md5", "$mmSite", "$mmSitesManager", "$mmLang", "$mmUtil", "$state", "$mmAddonManager", "mmCoreConfigConstants", function($q, $log, $mmConfig, mmLoginSSOCode, mmLoginLaunchSiteURL, mmLoginLaunchPassport,
-            md5, $mmSite, $mmSitesManager, $mmLang, $mmUtil, $state, $mmAddonManager, mmCoreConfigConstants) {
+.factory('$mmLoginHelper', ["$q", "$log", "$mmConfig", "mmLoginSSOCode", "mmLoginLaunchSiteURL", "mmLoginLaunchPassport", "md5", "$mmSite", "$mmSitesManager", "$mmLang", "$mmUtil", "$state", "mmCoreConfigConstants", function($q, $log, $mmConfig, mmLoginSSOCode, mmLoginLaunchSiteURL, mmLoginLaunchPassport,
+            md5, $mmSite, $mmSitesManager, $mmLang, $mmUtil, $state, mmCoreConfigConstants) {
     $log = $log.getInstance('$mmLoginHelper');
     var self = {};
         self.goToAddSite = function() {
@@ -8264,15 +7720,6 @@ angular.module('mm.core.login')
         } else {
             return $state.go('mm_login.site');
         }
-    };
-        self.goToSiteInitialPage = function() {
-        if ($mmSite.getInfo() && $mmSite.getInfo().userhomepage === 0) {
-            var $mmaFrontpage = $mmAddonManager.get('$mmaFrontpage');
-            if ($mmaFrontpage) {
-                return $state.go('site.mm_course-section');
-            }
-        }
-        return $state.go('site.mm_courses');
     };
         self.isFixedUrlSet = function() {
         return typeof mmCoreConfigConstants.siteurl != 'undefined';
@@ -8385,8 +7832,8 @@ angular.module('mm.core.settings')
 }]);
 
 angular.module('mm.core.settings')
-.controller('mmSettingsGeneralCtrl', ["$scope", "$mmLang", "$ionicHistory", "$mmEvents", "$mmConfig", "mmCoreEventLanguageChanged", "mmCoreSettingsReportInBackground", "mmCoreConfigConstants", "mmCoreSettingsDownloadSection", function($scope, $mmLang, $ionicHistory, $mmEvents, $mmConfig, mmCoreEventLanguageChanged,
-            mmCoreSettingsReportInBackground, mmCoreConfigConstants, mmCoreSettingsDownloadSection) {
+.controller('mmSettingsGeneralCtrl', ["$scope", "$mmLang", "$ionicHistory", "$mmEvents", "mmCoreEventLanguageChanged", "mmCoreSettingsReportInBackground", "mmCoreConfigConstants", function($scope, $mmLang, $ionicHistory, $mmEvents, mmCoreEventLanguageChanged,
+            mmCoreSettingsReportInBackground, mmCoreConfigConstants) {
     $scope.langs = mmCoreConfigConstants.languages;
     $mmLang.getCurrentLanguage().then(function(currentLanguage) {
         $scope.selectedLanguage = currentLanguage;
@@ -8396,12 +7843,6 @@ angular.module('mm.core.settings')
             $ionicHistory.clearCache();
             $mmEvents.trigger(mmCoreEventLanguageChanged);
         });
-    };
-    $mmConfig.get(mmCoreSettingsDownloadSection, true).then(function(downloadSectionEnabled) {
-        $scope.downloadSection = downloadSectionEnabled;
-    });
-    $scope.downloadSectionChanged = function(downloadSection) {
-        $mmConfig.set(mmCoreSettingsDownloadSection, downloadSection);
     };
     if (localStorage && localStorage.getItem && localStorage.setItem) {
         $scope.showReport = true;
@@ -8829,48 +8270,6 @@ angular.module('mm.core.user')
 });
 
 angular.module('mm.core.user')
-.factory('$mmUserHandlers', ["$mmUtil", "$mmContentLinksHelper", function($mmUtil, $mmContentLinksHelper) {
-    var self = {};
-        self.linksHandler = function() {
-        var self = {};
-                self.getActions = function(siteIds, url) {
-            if (url.indexOf('grade/report/user') == -1 &&
-                    (url.indexOf('/user/view.php') > -1 || url.indexOf('/user/profile.php') > -1)) {
-                var params = $mmUtil.extractUrlParams(url);
-                if (typeof params.id != 'undefined') {
-                    return [{
-                        message: 'mm.core.view',
-                        icon: 'ion-eye',
-                        sites: siteIds,
-                        action: function(siteId) {
-                            var stateParams = {
-                                courseid: params.course,
-                                userid: parseInt(params.id, 10)
-                            };
-                            $mmContentLinksHelper.goInSite('site.mm_user-profile', stateParams, siteId);
-                        }
-                    }];
-                }
-            }
-            return [];
-        };
-                self.handles = function(url) {
-            var patterns = ['/user/view.php', '/user/profile.php'];
-            if (url.indexOf('grade/report/user') == -1) {
-                for (var i = 0; i < patterns.length; i++) {
-                    var position = url.indexOf(patterns[i]);
-                    if (position > -1) {
-                        return url.substr(0, position);
-                    }
-                }
-            }
-        };
-        return self;
-    };
-    return self;
-}]);
-
-angular.module('mm.core.user')
 .constant('mmCoreUsersStore', 'users')
 .config(["$mmSitesFactoryProvider", "mmCoreUsersStore", function($mmSitesFactoryProvider, mmCoreUsersStore) {
     var stores = [
@@ -8885,11 +8284,9 @@ angular.module('mm.core.user')
     $log = $log.getInstance('$mmUser');
     var self = {};
         self.deleteStoredUser = function(id) {
-        if (!$mmSite.isLoggedIn()) {
-            return $q.reject();
-        }
+        var db = $mmSite.getDb();
         self.invalidateUserCache(id);
-        return $mmSite.getDb().remove(mmCoreUsersStore, parseInt(id));
+        return db.remove(mmCoreUsersStore, parseInt(id));
     };
         self.formatAddress = function(address, city, country) {
         if (address) {
@@ -8939,10 +8336,8 @@ angular.module('mm.core.user')
         return 'mmUser:data:'+userid;
     }
         self.getUserFromLocal = function(id) {
-        if (!$mmSite.isLoggedIn()) {
-            return $q.reject();
-        }
-        return $mmSite.getDb().get(mmCoreUsersStore, parseInt(id));
+        var db = $mmSite.getDb();
+        return db.get(mmCoreUsersStore, parseInt(id));
     };
         self.getUserFromWS = function(userid, courseid) {
         var wsName,
@@ -8988,10 +8383,8 @@ angular.module('mm.core.user')
         return $mmSite.invalidateWsCacheForKey(getUserCacheKey(userid));
     };
         self.storeUser = function(id, fullname, avatar) {
-        if (!$mmSite.isLoggedIn()) {
-            return $q.reject();
-        }
-        return $mmSite.getDb().insert(mmCoreUsersStore, {
+        var db = $mmSite.getDb();
+        return db.insert(mmCoreUsersStore, {
             id: parseInt(id),
             fullname: fullname,
             profileimageurl: avatar
@@ -9169,8 +8562,7 @@ angular.module('mm.addons.frontpage', [])
 angular.module('mm.addons.grades', [])
 .constant('mmaGradesPriority', 400)
 .constant('mmaGradesViewGradesPriority', 400)
-.config(["$stateProvider", "$mmUserDelegateProvider", "$mmCoursesDelegateProvider", "$mmContentLinksDelegateProvider", "mmaGradesPriority", "mmaGradesViewGradesPriority", function($stateProvider, $mmUserDelegateProvider, $mmCoursesDelegateProvider, $mmContentLinksDelegateProvider,
-            mmaGradesPriority, mmaGradesViewGradesPriority) {
+.config(["$stateProvider", "$mmUserDelegateProvider", "$mmCoursesDelegateProvider", "mmaGradesPriority", "mmaGradesViewGradesPriority", function($stateProvider, $mmUserDelegateProvider, $mmCoursesDelegateProvider, mmaGradesPriority, mmaGradesViewGradesPriority) {
     $stateProvider
     .state('site.grades', {
         url: '/grades',
@@ -9187,7 +8579,6 @@ angular.module('mm.addons.grades', [])
     });
     $mmUserDelegateProvider.registerProfileHandler('mmaGrades:viewGrades', '$mmaGradesHandlers.viewGrades', mmaGradesViewGradesPriority);
     $mmCoursesDelegateProvider.registerNavHandler('mmaGrades', '$mmaGradesHandlers.coursesNav', mmaGradesPriority);
-    $mmContentLinksDelegateProvider.registerLinkHandler('mmaGrades', '$mmaGradesHandlers.linksHandler');
 }]);
 
 angular.module('mm.addons.messages', ['mm.core'])
@@ -9199,8 +8590,8 @@ angular.module('mm.addons.messages', ['mm.core'])
 .constant('mmaMessagesAddContactPriority', 800)
 .constant('mmaMessagesBlockContactPriority', 600)
 .constant('mmaMessagesNewMessageEvent', 'mma-messages_new_message')
-.config(["$stateProvider", "$mmUserDelegateProvider", "$mmSideMenuDelegateProvider", "mmaMessagesSendMessagePriority", "mmaMessagesAddContactPriority", "mmaMessagesBlockContactPriority", "mmaMessagesPriority", "$mmContentLinksDelegateProvider", function($stateProvider, $mmUserDelegateProvider, $mmSideMenuDelegateProvider, mmaMessagesSendMessagePriority,
-            mmaMessagesAddContactPriority, mmaMessagesBlockContactPriority, mmaMessagesPriority, $mmContentLinksDelegateProvider) {
+.config(["$stateProvider", "$mmUserDelegateProvider", "$mmSideMenuDelegateProvider", "mmaMessagesSendMessagePriority", "mmaMessagesAddContactPriority", "mmaMessagesBlockContactPriority", "mmaMessagesPriority", function($stateProvider, $mmUserDelegateProvider, $mmSideMenuDelegateProvider, mmaMessagesSendMessagePriority,
+            mmaMessagesAddContactPriority, mmaMessagesBlockContactPriority, mmaMessagesPriority) {
     $stateProvider
     .state('site.messages', {
         url: '/messages',
@@ -9228,7 +8619,6 @@ angular.module('mm.addons.messages', ['mm.core'])
     $mmUserDelegateProvider.registerProfileHandler('mmaMessages:sendMessage', '$mmaMessagesHandlers.sendMessage', mmaMessagesSendMessagePriority);
     $mmUserDelegateProvider.registerProfileHandler('mmaMessages:addContact', '$mmaMessagesHandlers.addContact', mmaMessagesAddContactPriority);
     $mmUserDelegateProvider.registerProfileHandler('mmaMessages:blockContact', '$mmaMessagesHandlers.blockContact', mmaMessagesBlockContactPriority);
-    $mmContentLinksDelegateProvider.registerLinkHandler('mmaMessages', '$mmaMessagesHandlers.linksHandler');
 }])
 .run(["$mmaMessages", "$mmEvents", "$state", "$mmAddonManager", "$mmUtil", "mmCoreEventLogin", function($mmaMessages, $mmEvents, $state, $mmAddonManager, $mmUtil, mmCoreEventLogin) {
     $mmEvents.on(mmCoreEventLogin, function() {
@@ -9303,10 +8693,9 @@ angular.module('mm.addons.mod_book', ['mm.core'])
       }
     });
 }])
-.config(["$mmCourseDelegateProvider", "$mmCoursePrefetchDelegateProvider", "$mmContentLinksDelegateProvider", function($mmCourseDelegateProvider, $mmCoursePrefetchDelegateProvider, $mmContentLinksDelegateProvider) {
-    $mmCourseDelegateProvider.registerContentHandler('mmaModBook', 'book', '$mmaModBookHandlers.courseContentHandler');
+.config(["$mmCourseDelegateProvider", "$mmCoursePrefetchDelegateProvider", function($mmCourseDelegateProvider, $mmCoursePrefetchDelegateProvider) {
+    $mmCourseDelegateProvider.registerContentHandler('mmaModBook', 'book', '$mmaModBookCourseContentHandler');
     $mmCoursePrefetchDelegateProvider.registerPrefetchHandler('mmaModBook', 'book', '$mmaModBookPrefetchHandler');
-    $mmContentLinksDelegateProvider.registerLinkHandler('mmaModBook', '$mmaModBookHandlers.linksHandler');
 }]);
 
 angular.module('mm.addons.mod_chat', [])
@@ -9341,9 +8730,8 @@ angular.module('mm.addons.mod_chat', [])
         }
     });
 }])
-.config(["$mmCourseDelegateProvider", "$mmContentLinksDelegateProvider", function($mmCourseDelegateProvider, $mmContentLinksDelegateProvider) {
-    $mmCourseDelegateProvider.registerContentHandler('mmaModChat', 'chat', '$mmaModChatHandlers.courseContent');
-    $mmContentLinksDelegateProvider.registerLinkHandler('mmaModChat', '$mmaModChatHandlers.linksHandler');
+.config(["$mmCourseDelegateProvider", function($mmCourseDelegateProvider) {
+    $mmCourseDelegateProvider.registerContentHandler('mmaModChat', 'chat', '$mmaModChatCourseContentHandler');
 }]);
 angular.module('mm.addons.mod_choice', [])
 .constant('mmaModChoiceResultsNot', 0)
@@ -9366,9 +8754,8 @@ angular.module('mm.addons.mod_choice', [])
         }
     });
 }])
-.config(["$mmCourseDelegateProvider", "$mmContentLinksDelegateProvider", function($mmCourseDelegateProvider, $mmContentLinksDelegateProvider) {
-    $mmCourseDelegateProvider.registerContentHandler('mmaModChoice', 'choice', '$mmaModChoiceHandlers.courseContent');
-    $mmContentLinksDelegateProvider.registerLinkHandler('mmaModChoice', '$mmaModChoiceHandlers.linksHandler');
+.config(["$mmCourseDelegateProvider", function($mmCourseDelegateProvider) {
+    $mmCourseDelegateProvider.registerContentHandler('mmaModChoice', 'choice', '$mmaModChoiceCourseContentHandler');
 }]);
 
 angular.module('mm.addons.mod_folder', ['mm.core'])
@@ -9391,10 +8778,9 @@ angular.module('mm.addons.mod_folder', ['mm.core'])
       }
     });
 }])
-.config(["$mmCourseDelegateProvider", "$mmCoursePrefetchDelegateProvider", "$mmContentLinksDelegateProvider", function($mmCourseDelegateProvider, $mmCoursePrefetchDelegateProvider, $mmContentLinksDelegateProvider) {
-    $mmCourseDelegateProvider.registerContentHandler('mmaModFolder', 'folder', '$mmaModFolderHandlers.courseContent');
+.config(["$mmCourseDelegateProvider", "$mmCoursePrefetchDelegateProvider", function($mmCourseDelegateProvider, $mmCoursePrefetchDelegateProvider) {
+    $mmCourseDelegateProvider.registerContentHandler('mmaModFolder', 'folder', '$mmaModFolderCourseContentHandler');
     $mmCoursePrefetchDelegateProvider.registerPrefetchHandler('mmaModFolder', 'folder', '$mmaModFolderPrefetchHandler');
-    $mmContentLinksDelegateProvider.registerLinkHandler('mmaModFolder', '$mmaModFolderHandlers.linksHandler');
 }]);
 
 angular.module('mm.addons.mod_forum', [])
@@ -9420,7 +8806,7 @@ angular.module('mm.addons.mod_forum', [])
         url: '/mod_forum-discussion',
         params: {
             discussionid: null,
-            cid: null
+            courseid: null
         },
         views: {
             'site': {
@@ -9432,7 +8818,7 @@ angular.module('mm.addons.mod_forum', [])
     .state('site.mod_forum-newdiscussion', {
         url: '/mod_forum-newdiscussion',
         params: {
-            cid: null,
+            courseid: null,
             forumid: null,
             cmid: null
         },
@@ -9447,42 +8833,6 @@ angular.module('mm.addons.mod_forum', [])
 .config(["$mmCourseDelegateProvider", "$mmContentLinksDelegateProvider", function($mmCourseDelegateProvider, $mmContentLinksDelegateProvider) {
     $mmCourseDelegateProvider.registerContentHandler('mmaModForum', 'forum', '$mmaModForumHandlers.courseContent');
     $mmContentLinksDelegateProvider.registerLinkHandler('mmaModForum', '$mmaModForumHandlers.linksHandler');
-}]);
-
-angular.module('mm.addons.mod_glossary', ['mm.core'])
-.config(["$stateProvider", function($stateProvider) {
-    $stateProvider
-    .state('site.mod_glossary', {
-      url: '/mod_glossary',
-      params: {
-        module: null,
-        courseid: null
-      },
-      views: {
-        'site': {
-          controller: 'mmaModGlossaryIndexCtrl',
-          templateUrl: 'addons/mod_glossary/templates/index.html'
-        }
-      }
-    })
-    .state('site.mod_glossary-entry', {
-      url: '/mod_glossary-entry',
-      params: {
-        cid: null,
-        entry: null,
-        entryid: null
-      },
-      views: {
-        'site': {
-          controller: 'mmaModGlossaryEntryCtrl',
-          templateUrl: 'addons/mod_glossary/templates/entry.html'
-        }
-      }
-    });
-}])
-.config(["$mmCourseDelegateProvider", "$mmContentLinksDelegateProvider", function($mmCourseDelegateProvider, $mmContentLinksDelegateProvider) {
-    $mmCourseDelegateProvider.registerContentHandler('mmaModGlossary', 'glossary', '$mmaModGlossaryHandlers.courseContent');
-    $mmContentLinksDelegateProvider.registerLinkHandler('mmaModGlossary', '$mmaModGlossaryHandlers.linksHandler');
 }]);
 
 angular.module('mm.addons.mod_imscp', ['mm.core'])
@@ -9503,10 +8853,9 @@ angular.module('mm.addons.mod_imscp', ['mm.core'])
       }
     });
 }])
-.config(["$mmCourseDelegateProvider", "$mmCoursePrefetchDelegateProvider", "$mmContentLinksDelegateProvider", function($mmCourseDelegateProvider, $mmCoursePrefetchDelegateProvider, $mmContentLinksDelegateProvider) {
-    $mmCourseDelegateProvider.registerContentHandler('mmaModImscp', 'imscp', '$mmaModImscpHandlers.courseContent');
+.config(["$mmCourseDelegateProvider", "$mmCoursePrefetchDelegateProvider", function($mmCourseDelegateProvider, $mmCoursePrefetchDelegateProvider) {
+    $mmCourseDelegateProvider.registerContentHandler('mmaModImscp', 'imscp', '$mmaModImscpCourseContentHandler');
     $mmCoursePrefetchDelegateProvider.registerPrefetchHandler('mmaModImscp', 'imscp', '$mmaModImscpPrefetchHandler');
-    $mmContentLinksDelegateProvider.registerLinkHandler('mmaModImscp', '$mmaModImscpHandlers.linksHandler');
 }]);
 
 angular.module('mm.addons.mod_label', ['mm.core'])
@@ -9525,9 +8874,8 @@ angular.module('mm.addons.mod_label', ['mm.core'])
         }
     });
 }])
-.config(["$mmCourseDelegateProvider", "$mmContentLinksDelegateProvider", function($mmCourseDelegateProvider, $mmContentLinksDelegateProvider) {
-    $mmCourseDelegateProvider.registerContentHandler('mmaModLabel', 'label', '$mmaModLabelHandlers.courseContent');
-    $mmContentLinksDelegateProvider.registerLinkHandler('mmaModLabel', '$mmaModLabelHandlers.linksHandler');
+.config(["$mmCourseDelegateProvider", function($mmCourseDelegateProvider) {
+    $mmCourseDelegateProvider.registerContentHandler('mmaModLabel', 'label', '$mmaModLabelCourseContentHandler');
 }]);
 
 angular.module('mm.addons.mod_lti', [])
@@ -9548,9 +8896,8 @@ angular.module('mm.addons.mod_lti', [])
         }
     });
 }])
-.config(["$mmCourseDelegateProvider", "$mmContentLinksDelegateProvider", function($mmCourseDelegateProvider, $mmContentLinksDelegateProvider) {
-    $mmCourseDelegateProvider.registerContentHandler('mmaModLti', 'lti', '$mmaModLtiHandlers.courseContent');
-    $mmContentLinksDelegateProvider.registerLinkHandler('mmaModLti', '$mmaModLtiHandlers.linksHandler');
+.config(["$mmCourseDelegateProvider", function($mmCourseDelegateProvider) {
+    $mmCourseDelegateProvider.registerContentHandler('mmaModLti', 'lti', '$mmaModLtiCourseContentHandler');
 }]);
 
 angular.module('mm.addons.mod_page', ['mm.core'])
@@ -9571,10 +8918,9 @@ angular.module('mm.addons.mod_page', ['mm.core'])
       }
     });
 }])
-.config(["$mmCourseDelegateProvider", "$mmCoursePrefetchDelegateProvider", "$mmContentLinksDelegateProvider", function($mmCourseDelegateProvider, $mmCoursePrefetchDelegateProvider, $mmContentLinksDelegateProvider) {
-    $mmCourseDelegateProvider.registerContentHandler('mmaModPage', 'page', '$mmaModPageHandlers.courseContent');
+.config(["$mmCourseDelegateProvider", "$mmCoursePrefetchDelegateProvider", function($mmCourseDelegateProvider, $mmCoursePrefetchDelegateProvider) {
+    $mmCourseDelegateProvider.registerContentHandler('mmaModPage', 'page', '$mmaModPageCourseContentHandler');
     $mmCoursePrefetchDelegateProvider.registerPrefetchHandler('mmaModPage', 'page', '$mmaModPagePrefetchHandler');
-    $mmContentLinksDelegateProvider.registerLinkHandler('mmaModPage', '$mmaModPageHandlers.linksHandler');
 }]);
 
 angular.module('mm.addons.mod_resource', ['mm.core'])
@@ -9595,10 +8941,9 @@ angular.module('mm.addons.mod_resource', ['mm.core'])
       }
     });
 }])
-.config(["$mmCourseDelegateProvider", "$mmCoursePrefetchDelegateProvider", "$mmContentLinksDelegateProvider", function($mmCourseDelegateProvider, $mmCoursePrefetchDelegateProvider, $mmContentLinksDelegateProvider) {
-    $mmCourseDelegateProvider.registerContentHandler('mmaModResource', 'resource', '$mmaModResourceHandlers.courseContent');
+.config(["$mmCourseDelegateProvider", "$mmCoursePrefetchDelegateProvider", function($mmCourseDelegateProvider, $mmCoursePrefetchDelegateProvider) {
+    $mmCourseDelegateProvider.registerContentHandler('mmaModResource', 'resource', '$mmaModResourceCourseContentHandler');
     $mmCoursePrefetchDelegateProvider.registerPrefetchHandler('mmaModResource', 'resource', '$mmaModResourcePrefetchHandler');
-    $mmContentLinksDelegateProvider.registerLinkHandler('mmaModResource', '$mmaModResourceHandlers.linksHandler');
 }]);
 
 angular.module('mm.addons.mod_scorm', ['mm.core'])
@@ -9641,53 +8986,38 @@ angular.module('mm.addons.mod_scorm', ['mm.core'])
       }
     });
 }])
-.config(["$mmCourseDelegateProvider", "$mmCoursePrefetchDelegateProvider", "$mmContentLinksDelegateProvider", function($mmCourseDelegateProvider, $mmCoursePrefetchDelegateProvider, $mmContentLinksDelegateProvider) {
-    $mmCourseDelegateProvider.registerContentHandler('mmaModScorm', 'scorm', '$mmaModScormHandlers.courseContent');
+.config(["$mmCourseDelegateProvider", "$mmCoursePrefetchDelegateProvider", function($mmCourseDelegateProvider, $mmCoursePrefetchDelegateProvider) {
+    $mmCourseDelegateProvider.registerContentHandler('mmaModScorm', 'scorm', '$mmaModScormCourseContentHandler');
     $mmCoursePrefetchDelegateProvider.registerPrefetchHandler('mmaModScorm', 'scorm', '$mmaModScormPrefetchHandler');
-    $mmContentLinksDelegateProvider.registerLinkHandler('mmaModScorm', '$mmaModScormHandlers.linksHandler');
 }])
-.run(["$timeout", "$mmaModScormSync", "$mmApp", "$mmEvents", "$mmSite", "mmCoreEventLogin", function($timeout, $mmaModScormSync, $mmApp, $mmEvents, $mmSite, mmCoreEventLogin) {
+.run(["$timeout", "$mmaModScormSync", "$mmApp", "$mmEvents", "$mmaModScormOnline", "$mmaModScormOffline", "mmCoreEventLogin", "mmCoreEventLogout", function($timeout, $mmaModScormSync, $mmApp, $mmEvents, $mmaModScormOnline, $mmaModScormOffline, mmCoreEventLogin,
+            mmCoreEventLogout) {
     var lastExecution = 0,
-        executing = false,
-        allSitesCalled = false;
-    function syncScorms(allSites) {
+        executing = false;
+    function syncScorms() {
         var now = new Date().getTime();
-        if (!allSites && !$mmSite.isLoggedIn()) {
-            return;
-        }
         if (now - 5000 > lastExecution && (!executing || now - 300000 > lastExecution)) {
             lastExecution = new Date().getTime();
             executing = true;
             $timeout(function() {
-                $mmaModScormSync.syncAllScorms(allSites ? undefined : $mmSite.getId()).finally(function() {
+                $mmaModScormSync.syncAllScorms().finally(function() {
                     executing = false;
                 });
             }, 1000);
         }
     }
     $mmApp.ready().then(function() {
-        document.addEventListener('online', function() {
-            syncScorms(false);
-        }, false);
-        window.addEventListener('online', function() {
-            syncScorms(false);
-        }, false);
-        if (!$mmSite.isLoggedIn()) {
-            allSitesCalled = true;
-            if ($mmApp.isOnline()) {
-                syncScorms(true);
-            }
-        }
+        document.addEventListener('online', syncScorms, false);
+        window.addEventListener('online', syncScorms, false);
     });
     $mmEvents.on(mmCoreEventLogin, function() {
-        var allSites = false;
-        if (!allSitesCalled) {
-            allSitesCalled = true;
-            allSites = true;
-        }
         if ($mmApp.isOnline()) {
-            syncScorms(allSites);
+            syncScorms();
         }
+    });
+    $mmEvents.on(mmCoreEventLogout, function() {
+        $mmaModScormOnline.clearBlockedScorms();
+        $mmaModScormOffline.clearBlockedScorms();
     });
 }]);
 
@@ -9708,9 +9038,8 @@ angular.module('mm.addons.mod_survey', [])
         }
     });
 }])
-.config(["$mmCourseDelegateProvider", "$mmContentLinksDelegateProvider", function($mmCourseDelegateProvider, $mmContentLinksDelegateProvider) {
-    $mmCourseDelegateProvider.registerContentHandler('mmaModSurvey', 'survey', '$mmaModSurveyHandlers.courseContent');
-    $mmContentLinksDelegateProvider.registerLinkHandler('mmaModSurvey', '$mmaModSurveyHandlers.linksHandler');
+.config(["$mmCourseDelegateProvider", function($mmCourseDelegateProvider) {
+    $mmCourseDelegateProvider.registerContentHandler('mmaModSurvey', 'survey', '$mmaModSurveyCourseContentHandler');
 }]);
 
 angular.module('mm.addons.mod_url', ['mm.core'])
@@ -9730,9 +9059,8 @@ angular.module('mm.addons.mod_url', ['mm.core'])
       }
     });
 }])
-.config(["$mmCourseDelegateProvider", "$mmContentLinksDelegateProvider", function($mmCourseDelegateProvider, $mmContentLinksDelegateProvider) {
-    $mmCourseDelegateProvider.registerContentHandler('mmaModUrl', 'url', '$mmaModUrlHandlers.courseContentHandler');
-    $mmContentLinksDelegateProvider.registerLinkHandler('mmaModUrl', '$mmaModUrlHandlers.linksHandler');
+.config(["$mmCourseDelegateProvider", function($mmCourseDelegateProvider) {
+    $mmCourseDelegateProvider.registerContentHandler('mmaModUrl', 'url', '$mmaModUrlCourseContentHandler');
 }]);
 
 angular.module('mm.addons.notes', [])
@@ -9805,7 +9133,7 @@ angular.module('mm.addons.notifications', [])
 angular.module('mm.addons.participants', [])
 .constant('mmaParticipantsListLimit', 50)
 .constant('mmaParticipantsPriority', 600)
-.config(["$stateProvider", "$mmCoursesDelegateProvider", "$mmContentLinksDelegateProvider", "mmaParticipantsPriority", function($stateProvider, $mmCoursesDelegateProvider, $mmContentLinksDelegateProvider, mmaParticipantsPriority) {
+.config(["$stateProvider", "$mmCoursesDelegateProvider", "mmaParticipantsPriority", function($stateProvider, $mmCoursesDelegateProvider, mmaParticipantsPriority) {
     $stateProvider
         .state('site.participants', {
             url: '/participants',
@@ -9819,9 +9147,7 @@ angular.module('mm.addons.participants', [])
                 course: null
             }
         });
-    $mmCoursesDelegateProvider.registerNavHandler('mmaParticipants', '$mmaParticipantsHandlers.coursesNavHandler',
-                mmaParticipantsPriority);
-    $mmContentLinksDelegateProvider.registerLinkHandler('mmaParticipants', '$mmaParticipantsHandlers.linksHandler');
+    $mmCoursesDelegateProvider.registerNavHandler('mmaParticipants', '$mmaParticipantsCoursesNavHandler', mmaParticipantsPriority);
 }]);
 
 angular.module('mm.addons.pushnotifications', [])
@@ -10066,9 +9392,6 @@ angular.module('mm.addons.calendar')
         });
     };
         self.getEventFromLocalDb = function(id) {
-        if (!$mmSite.isLoggedIn()) {
-            return $q.reject();
-        }
         return $mmSite.getDb().get(mmaCalendarEventsStore, id);
     };
         self.getEventIcon = function(type) {
@@ -10192,9 +9515,6 @@ angular.module('mm.addons.calendar')
         return $q.all(promises);
     };
         self.updateNotificationTime = function(event, time) {
-        if (!$mmSite.isLoggedIn()) {
-            return $q.reject();
-        }
         var db = $mmSite.getDb();
         event.notificationtime = time;
         return db.insert(mmaCalendarEventsStore, event).then(function() {
@@ -10420,8 +9740,7 @@ angular.module('mm.addons.coursecompletion')
 }]);
 
 angular.module('mm.addons.files')
-.controller('mmaFilesChooseSiteCtrl', ["$scope", "$stateParams", "$mmSitesManager", "$mmaFilesHelper", "$ionicHistory", "$mmLoginHelper", function($scope, $stateParams, $mmSitesManager, $mmaFilesHelper, $ionicHistory,
-            $mmLoginHelper) {
+.controller('mmaFilesChooseSiteCtrl', ["$scope", "$state", "$stateParams", "$mmSitesManager", "$mmaFilesHelper", "$ionicHistory", function($scope, $state, $stateParams, $mmSitesManager, $mmaFilesHelper, $ionicHistory) {
     var fileEntry = $stateParams.file || {};
     $scope.filename = fileEntry.name;
     $mmSitesManager.getSites().then(function(sites) {
@@ -10432,7 +9751,7 @@ angular.module('mm.addons.files')
             $ionicHistory.nextViewOptions({
                 disableBack: true
             });
-            $mmLoginHelper.goToSiteInitialPage();
+            $state.go('site.mm_courses');
         });
     };
 }]);
@@ -11125,7 +10444,7 @@ angular.module('mm.addons.grades')
 }]);
 
 angular.module('mm.addons.grades')
-.factory('$mmaGrades', ["$q", "$log", "$mmSite", "$mmText", "$ionicPlatform", "$translate", "$mmCourse", "$mmCourses", "$mmSitesManager", function($q, $log, $mmSite, $mmText, $ionicPlatform, $translate, $mmCourse, $mmCourses, $mmSitesManager) {
+.factory('$mmaGrades', ["$q", "$log", "$mmSite", "$mmText", "$ionicPlatform", "$translate", "$mmCourse", "$mmCourses", function($q, $log, $mmSite, $mmText, $ionicPlatform, $translate, $mmCourse, $mmCourses) {
     $log = $log.getInstance('$mmaGrades');
     var self = {};
         function formatGradesTable(table, showSimple) {
@@ -11244,17 +10563,14 @@ angular.module('mm.addons.grades')
             };
         });
     };
-        self.isPluginEnabled = function(siteId) {
-        siteId = siteId || $mmSite.getId();
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            return site.wsAvailable('gradereport_user_get_grades_table');
-        });
+        self.isPluginEnabled = function() {
+        return $mmSite.wsAvailable('gradereport_user_get_grades_table');
     };
-        self.isPluginEnabledForCourse = function(courseId, siteId) {
+        self.isPluginEnabledForCourse = function(courseId) {
         if (!courseId) {
             return $q.reject();
         }
-        return $mmCourses.getUserCourse(courseId, true, siteId).then(function(course) {
+        return $mmCourses.getUserCourse(courseId, true).then(function(course) {
             if (course && typeof course.showgrades != 'undefined' && !course.showgrades) {
                 return false;
             }
@@ -11280,7 +10596,7 @@ angular.module('mm.addons.grades')
 }]);
 
 angular.module('mm.addons.grades')
-.factory('$mmaGradesHandlers', ["$mmaGrades", "$state", "$mmUtil", "$mmContentLinksHelper", "mmCoursesAccessMethods", function($mmaGrades, $state, $mmUtil, $mmContentLinksHelper, mmCoursesAccessMethods) {
+.factory('$mmaGradesHandlers', ["$mmaGrades", "$state", "mmCoursesAccessMethods", function($mmaGrades, $state, mmCoursesAccessMethods) {
     var self = {};
         self.coursesNav = function() {
         var self = {};
@@ -11328,50 +10644,6 @@ angular.module('mm.addons.grades')
                     });
                 };
             };
-        };
-        return self;
-    };
-        self.linksHandler = function() {
-        var self = {};
-                function isEnabled(siteId, courseId) {
-            return $mmaGrades.isPluginEnabled(siteId).then(function(enabled) {
-                if (enabled) {
-                    return $mmaGrades.isPluginEnabledForCourse(courseId, siteId);
-                }
-            });
-        }
-                self.getActions = function(siteIds, url) {
-            if (typeof self.handles(url) != 'undefined') {
-                var params = $mmUtil.extractUrlParams(url);
-                if (typeof params.id != 'undefined') {
-                    var courseId = parseInt(params.id, 10);
-                    return $mmContentLinksHelper.filterSupportedSites(siteIds, isEnabled, false, courseId).then(function(ids) {
-                        if (!ids.length) {
-                            return [];
-                        } else {
-                            return [{
-                                message: 'mm.core.view',
-                                icon: 'ion-eye',
-                                sites: ids,
-                                action: function(siteId) {
-                                    var stateParams = {
-                                        course: {id: courseId},
-                                        userid: parseInt(params.userid, 10)
-                                    };
-                                    $mmContentLinksHelper.goInSite('site.grades', stateParams, siteId);
-                                }
-                            }];
-                        }
-                    });
-                }
-            }
-            return [];
-        };
-                self.handles = function(url) {
-            var position = url.indexOf('/grade/report/user/index.php');
-            if (position > -1) {
-                return url.substr(0, position);
-            }
         };
         return self;
     };
@@ -11448,16 +10720,14 @@ angular.module('mm.addons.messages')
 }]);
 
 angular.module('mm.addons.messages')
-.controller('mmaMessagesDiscussionCtrl', ["$scope", "$stateParams", "$mmApp", "$mmaMessages", "$mmSite", "$timeout", "$mmEvents", "$window", "$ionicScrollDelegate", "mmUserProfileState", "$mmUtil", "mmaMessagesPollInterval", "$interval", "$log", "$ionicHistory", "$ionicPlatform", "mmCoreEventKeyboardShow", "mmCoreEventKeyboardHide", "mmaMessagesDiscussionLoadedEvent", "mmaMessagesDiscussionLeftEvent", "$mmUser", "$translate", function($scope, $stateParams, $mmApp, $mmaMessages, $mmSite, $timeout, $mmEvents, $window,
+.controller('mmaMessagesDiscussionCtrl', ["$scope", "$stateParams", "$mmApp", "$mmaMessages", "$mmSite", "$timeout", "$mmEvents", "$window", "$ionicScrollDelegate", "mmUserProfileState", "$mmUtil", "mmaMessagesPollInterval", "$interval", "$log", "$ionicHistory", "$ionicPlatform", "mmCoreEventKeyboardShow", "mmCoreEventKeyboardHide", "mmaMessagesDiscussionLoadedEvent", "mmaMessagesDiscussionLeftEvent", function($scope, $stateParams, $mmApp, $mmaMessages, $mmSite, $timeout, $mmEvents, $window,
         $ionicScrollDelegate, mmUserProfileState, $mmUtil, mmaMessagesPollInterval, $interval, $log, $ionicHistory, $ionicPlatform,
-        mmCoreEventKeyboardShow, mmCoreEventKeyboardHide, mmaMessagesDiscussionLoadedEvent, mmaMessagesDiscussionLeftEvent,
-        $mmUser, $translate) {
+        mmCoreEventKeyboardShow, mmCoreEventKeyboardHide, mmaMessagesDiscussionLoadedEvent, mmaMessagesDiscussionLeftEvent) {
     $log = $log.getInstance('mmaMessagesDiscussionCtrl');
     var userId = $stateParams.userId,
         userFullname = $stateParams.userFullname,
         messagesBeingSent = 0,
         polling,
-        fetching,
         backView = $ionicHistory.backView(),
         lastMessage,
         scrollView = $ionicScrollDelegate.$getByHandle('mmaMessagesScroll');
@@ -11468,12 +10738,6 @@ angular.module('mm.addons.messages')
     $scope.profileLink = true;
     if (userFullname) {
         $scope.title = userFullname;
-    } else if (userId) {
-        $mmUser.getProfile(userId).then(function(user) {
-            if (!$scope.title) {
-                $scope.title = user.fullname;
-            }
-        });
     }
     if (backView && backView.stateName === mmUserProfileState) {
         $scope.profileLink = false;
@@ -11545,32 +10809,26 @@ angular.module('mm.addons.messages')
             });
         }
     };
-    function fetchMessages() {
-        $log.debug('Polling new messages for discussion with user ' + userId);
-        if (messagesBeingSent > 0) {
-            return;
-        } else if (!$mmApp.isOnline()) {
-            return;
-        } else if (fetching) {
-            return;
-        }
-        fetching = true;
-        $mmaMessages.invalidateDiscussionCache(userId);
-        $mmaMessages.getDiscussion(userId).then(function(messages) {
-            if (messagesBeingSent > 0) {
-                return;
-            }
-            $scope.messages = $mmaMessages.sortMessages(messages);
-            notifyNewMessage();
-        }).finally(function() {
-            fetching = false;
-        });
-    }
     function setPolling() {
         if (polling) {
             return;
         }
-        polling = $interval(fetchMessages, mmaMessagesPollInterval);
+        polling = $interval(function() {
+            $log.debug('Polling new messages for discussion with user ' + userId);
+            if (messagesBeingSent > 0) {
+                return;
+            } else if (!$mmApp.isOnline()) {
+                return;
+            }
+            $mmaMessages.invalidateDiscussionCache(userId);
+            $mmaMessages.getDiscussion(userId).then(function(messages) {
+                if (messagesBeingSent > 0) {
+                    return;
+                }
+                $scope.messages = $mmaMessages.sortMessages(messages);
+                notifyNewMessage();
+            });
+        }, mmaMessagesPollInterval);
     }
     function unsetPolling() {
         if (polling) {
@@ -11639,27 +10897,6 @@ angular.module('mm.addons.messages')
             });
         }
     }
-    $scope.canDelete = $mmaMessages.canDeleteMessages();
-    $scope.selectMessage = function(id) {
-        $scope.selectedMessage = id;
-    };
-    $scope.deleteMessage = function(message, index) {
-        $mmUtil.showConfirm($translate('mma.messages.deletemessageconfirmation')).then(function() {
-            var modal = $mmUtil.showModalLoading('mm.core.deleting', true);
-            $mmaMessages.deleteMessage(message.id, message.read).then(function() {
-                $scope.messages.splice(index, 1);
-                fetchMessages();
-            }).catch(function(error) {
-                if (typeof error === 'string') {
-                    $mmUtil.showErrorModal(error);
-                } else {
-                    $mmUtil.showErrorModal('mma.messages.errordeletemessage', true);
-                }
-            }).finally(function() {
-                modal.dismiss();
-            });
-        });
-    };
     if ($ionicPlatform.isTablet()) {
         $mmEvents.trigger(mmaMessagesDiscussionLoadedEvent, userId);
     }
@@ -11756,7 +10993,7 @@ angular.module('mm.addons.messages')
 }]);
 
 angular.module('mm.addons.messages')
-.factory('$mmaMessagesHandlers', ["$log", "$mmaMessages", "$mmSite", "$state", "$mmUtil", "$mmContentLinksHelper", function($log, $mmaMessages, $mmSite, $state, $mmUtil, $mmContentLinksHelper) {
+.factory('$mmaMessagesHandlers', ["$log", "$mmaMessages", "$mmSite", "$state", "$mmUtil", function($log, $mmaMessages, $mmSite, $state, $mmUtil) {
     $log = $log.getInstance('$mmaMessagesHandlers');
     var self = {};
         self.addContact = function() {
@@ -11904,64 +11141,6 @@ angular.module('mm.addons.messages')
         };
         return self;
     };
-        self.linksHandler = function() {
-        var self = {};
-                function isEnabledForSite(siteId) {
-            return $mmaMessages.isPluginEnabled(siteId);
-        }
-                self.getActions = function(siteIds, url) {
-            if (typeof self.handles(url) != 'undefined') {
-                return $mmContentLinksHelper.filterSupportedSites(siteIds, isEnabledForSite, false).then(function(ids) {
-                    if (!ids.length) {
-                        return [];
-                    } else {
-                        var params = $mmUtil.extractUrlParams(url);
-                        return [{
-                            message: 'mm.core.view',
-                            icon: 'ion-eye',
-                            sites: ids,
-                            action: function(siteId) {
-                                var stateName,
-                                    stateParams;
-                                if (typeof params.user1 != 'undefined' && typeof params.user2 != 'undefined') {
-                                    if ($mmSite.getUserId() == params.user1) {
-                                        stateName = 'site.messages-discussion';
-                                        stateParams = {userId: parseInt(params.user2, 10)};
-                                    } else if ($mmSite.getUserId() == params.user2) {
-                                        stateName = 'site.messages-discussion';
-                                        stateParams = {userId: parseInt(params.user1, 10)};
-                                    } else {
-                                        $mmUtil.openInBrowser(url);
-                                        return;
-                                    }
-                                } else if (typeof params.id != 'undefined') {
-                                    stateName = 'site.messages-discussion';
-                                    stateParams = {userId: parseInt(params.id, 10)};
-                                }
-                                if (!stateName) {
-                                    $state.go('redirect', {
-                                        siteid: siteId,
-                                        state: 'site.messages',
-                                        params: {}
-                                    });
-                                } else {
-                                    $mmContentLinksHelper.goInSite(stateName, stateParams, siteId);
-                                }
-                            }
-                        }];
-                    }
-                });
-            }
-            return [];
-        };
-                self.handles = function(url) {
-            var position = url.indexOf('/message/index.php');
-            if (position > -1) {
-                return url.substr(0, position);
-            }
-        };
-        return self;
-    };
     return self;
 }]);
 
@@ -11981,20 +11160,6 @@ angular.module('mm.addons.messages')
             userids: [ userId ]
         }).then(function() {
             return self.invalidateAllContactsCache($mmSite.getUserId());
-        });
-    };
-        self.canDeleteMessages = function() {
-        return $mmSite.wsAvailable('core_message_delete_message');
-    };
-        self.deleteMessage = function(id, read, userId) {
-        userId = userId || $mmSite.getUserId();
-        var params = {
-                messageid: id,
-                userid: userId,
-                read: read
-            };
-        return $mmSite.write('core_message_delete_message', params).then(function() {
-            return self.invalidateDiscussionCache(userId);
         });
     };
         self.getAllContacts = function() {
@@ -12180,12 +11345,7 @@ angular.module('mm.addons.messages')
             type: 'conversations',
             newestfirst: 1,
         });
-        return $mmSite.read('core_message_get_messages', params, presets).then(function(response) {
-            angular.forEach(response.messages, function(message) {
-                message.read = params.read == 0 ? 0 : 1;
-            });
-            return response;
-        });
+        return $mmSite.read('core_message_get_messages', params, presets);
     };
         self._getRecentMessages = function(params, presets) {
         params = angular.extend(params, {
@@ -12264,25 +11424,22 @@ angular.module('mm.addons.messages')
             return isContact;
         });
     };
-        self._isMessagingEnabled = function(siteId) {
-        siteId = siteId || $mmSite.getId();
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            var enabled = site.canUseAdvancedFeature('messaging', 'unknown');
-            if (enabled === 'unknown') {
-                $log.debug('Using WS call to check if messaging is enabled.');
-                return site.read('core_message_search_contacts', {
-                    searchtext: 'CheckingIfMessagingIsEnabled',
-                    onlymycourses: 0
-                }, {
-                    emergencyCache: false,
-                    cacheKey: self._getCacheKeyForEnabled()
-                });
-            }
-            if (enabled) {
-                return true;
-            }
-            return $q.reject();
-        });
+        self._isMessagingEnabled = function() {
+        var enabled = $mmSite.canUseAdvancedFeature('messaging', 'unknown');
+        if (enabled === 'unknown') {
+            $log.debug('Using WS call to check if messaging is enabled.');
+            return $mmSite.read('core_message_search_contacts', {
+                searchtext: 'CheckingIfMessagingIsEnabled',
+                onlymycourses: 0
+            }, {
+                emergencyCache: false,
+                cacheKey: self._getCacheKeyForEnabled()
+            });
+        }
+        if (enabled) {
+            return $q.when(true);
+        }
+        return $q.reject();
     };
        self.isMessagingEnabledForSite = function(siteid) {
         return $mmSitesManager.getSite(siteid).then(function(site) {
@@ -12299,19 +11456,19 @@ angular.module('mm.addons.messages')
             });
         });
     };
-        self.isPluginEnabled = function(siteId) {
-        siteId = siteId || $mmSite.getId();
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            if (!site.canUseAdvancedFeature('messaging')) {
-                return false;
-            } else if (!site.wsAvailable('core_message_get_messages')) {
-                return false;
-            } else {
-                return self._isMessagingEnabled(siteId).then(function() {
-                    return true;
-                });
-            }
-        });
+        self.isPluginEnabled = function() {
+        var infos,
+            enabled = $q.when(true);
+        if (!$mmSite.isLoggedIn()) {
+            enabled = $q.reject();
+        } else if (!$mmSite.canUseAdvancedFeature('messaging')) {
+            enabled = $q.reject();
+        } else if (!$mmSite.wsAvailable('core_message_get_messages')) {
+            enabled = $q.reject();
+        } else {
+            enabled = self._isMessagingEnabled();
+        }
+        return enabled;
     };
         self.isSearchEnabled = function() {
         return $mmSite.wsAvailable('core_message_search_contacts');
@@ -12449,7 +11606,7 @@ angular.module('mm.addons.mod_assign')
 }]);
 
 angular.module('mm.addons.mod_assign')
-.factory('$mmaModAssign', ["$mmSite", "$q", "$mmUser", "$mmSitesManager", function($mmSite, $q, $mmUser, $mmSitesManager) {
+.factory('$mmaModAssign', ["$mmSite", "$q", "$mmUser", function($mmSite, $q, $mmUser) {
     var self = {};
         self.getAssignment = function(courseid, cmid, refresh) {
         var params = {
@@ -12540,17 +11697,14 @@ angular.module('mm.addons.mod_assign')
             return submissions;
         });
     };
-        self.isPluginEnabled = function(siteId) {
-        siteId = siteId || $mmSite.getId();
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            return site.wsAvailable('mod_assign_get_assignments') && site.wsAvailable('mod_assign_get_submissions');
-        });
+        self.isPluginEnabled = function() {
+        return $mmSite.wsAvailable('mod_assign_get_assignments') && $mmSite.wsAvailable('mod_assign_get_submissions');
     };
     return self;
 }]);
 
 angular.module('mm.addons.mod_assign')
-.factory('$mmaModAssignHandlers', ["$mmCourse", "$mmaModAssign", "$state", "$q", "$mmContentLinksHelper", function($mmCourse, $mmaModAssign, $state, $q, $mmContentLinksHelper) {
+.factory('$mmaModAssignHandlers', ["$mmCourse", "$mmaModAssign", "$state", "$mmSite", function($mmCourse, $mmaModAssign, $state, $mmSite) {
     var self = {};
         self.courseContent = function() {
         var self = {};
@@ -12562,10 +11716,8 @@ angular.module('mm.addons.mod_assign')
                 $scope.title = module.name;
                 $scope.icon = $mmCourse.getModuleIconSrc('assign');
                 $scope.action = function(e) {
-                    if (e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                    }
+                    e.preventDefault();
+                    e.stopPropagation();
                     $state.go('site.mod_assign', {module: module, courseid: courseid});
                 };
             };
@@ -12574,25 +11726,26 @@ angular.module('mm.addons.mod_assign')
     };
         self.linksHandler = function() {
         var self = {};
-                function isEnabled(siteId, courseId) {
-            return $mmaModAssign.isPluginEnabled(siteId).then(function(enabled) {
-                if (!enabled) {
-                    return false;
-                }
-                return courseId || $mmCourse.canGetModuleWithoutCourseId(siteId);
-            });
-        }
-                self.getActions = function(siteIds, url, courseId) {
-            if (typeof self.handles(url) != 'undefined') {
-                return $mmContentLinksHelper.treatModuleIndexUrl(siteIds, url, isEnabled, courseId);
-            }
-            return $q.when([]);
+                self.isEnabled = function() {
+            return $mmaModAssign.isPluginEnabled();
         };
-                self.handles = function(url) {
-            var position = url.indexOf('/mod/assign/view.php');
-            if (position > -1) {
-                return url.substr(0, position);
+                self.getActions = function(url, courseid) {
+            if (courseid && $mmSite.containsUrl(url) && url.indexOf('/mod/assign/') > -1) {
+                var matches = url.match(/view\.php\?id=(\d*)/);
+                if (matches && typeof matches[1] != 'undefined') {
+                    return [{
+                        message: 'mm.core.view',
+                        icon: 'ion-eye',
+                        action: function() {
+                            $state.go('site.mod_assign', {
+                                courseid: courseid,
+                                module: {id: matches[1]}
+                            });
+                        }
+                    }];
+                }
             }
+            return [];
         };
         return self;
     };
@@ -12680,7 +11833,7 @@ angular.module('mm.addons.mod_book')
 });
 
 angular.module('mm.addons.mod_book')
-.factory('$mmaModBook', ["$mmFilepool", "$mmSite", "$mmFS", "$http", "$log", "$q", "$mmSitesManager", "mmaModBookComponent", function($mmFilepool, $mmSite, $mmFS, $http, $log, $q, $mmSitesManager, mmaModBookComponent) {
+.factory('$mmaModBook', ["$mmFilepool", "$mmSite", "$mmFS", "$http", "$log", "$q", "mmaModBookComponent", function($mmFilepool, $mmSite, $mmFS, $http, $log, $q, mmaModBookComponent) {
     $log = $log.getInstance('$mmaModBook');
     var self = {};
         self.downloadAllContent = function(module) {
@@ -12839,12 +11992,9 @@ angular.module('mm.addons.mod_book')
         self.isFileDownloadable = function(file) {
         return file.type === 'file';
     };
-        self.isPluginEnabled = function(siteId) {
-        siteId = siteId || $mmSite.getId();
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            var version = site.getInfo().version;
-            return version && (parseInt(version) >= 2015051100) && site.canDownloadFiles();
-        });
+        self.isPluginEnabled = function() {
+        var version = $mmSite.getInfo().version;
+        return version && (parseInt(version) >= 2015051100) && $mmSite.canDownloadFiles();
     };
         self.logView = function(id) {
         if (id) {
@@ -12865,105 +12015,75 @@ angular.module('mm.addons.mod_book')
 }]);
 
 angular.module('mm.addons.mod_book')
-.factory('$mmaModBookHandlers', ["$mmCourse", "$mmaModBook", "$mmEvents", "$state", "$mmSite", "$mmUtil", "$mmFilepool", "$mmCoursePrefetchDelegate", "mmCoreDownloading", "mmCoreNotDownloaded", "mmCoreOutdated", "mmCoreDownloaded", "mmCoreEventPackageStatusChanged", "mmaModBookComponent", "$mmContentLinksHelper", "$q", function($mmCourse, $mmaModBook, $mmEvents, $state, $mmSite, $mmUtil, $mmFilepool,
+.factory('$mmaModBookCourseContentHandler', ["$mmCourse", "$mmaModBook", "$mmEvents", "$state", "$mmSite", "$mmUtil", "$mmFilepool", "$mmCoursePrefetchDelegate", "mmCoreDownloading", "mmCoreNotDownloaded", "mmCoreOutdated", "mmCoreDownloaded", "mmCoreEventPackageStatusChanged", "mmaModBookComponent", function($mmCourse, $mmaModBook, $mmEvents, $state, $mmSite, $mmUtil, $mmFilepool,
             $mmCoursePrefetchDelegate, mmCoreDownloading, mmCoreNotDownloaded, mmCoreOutdated, mmCoreDownloaded,
-            mmCoreEventPackageStatusChanged, mmaModBookComponent, $mmContentLinksHelper, $q) {
+            mmCoreEventPackageStatusChanged, mmaModBookComponent) {
     var self = {};
-        self.courseContentHandler = function() {
-        var self = {};
-                self.isEnabled = function() {
-            return $mmaModBook.isPluginEnabled();
-        };
-                self.getController = function(module, courseid) {
-            return function($scope) {
-                var downloadBtn,
-                    refreshBtn,
-                    revision = $mmFilepool.getRevisionFromFileList(module.contents),
-                    timemodified = $mmFilepool.getTimemodifiedFromFileList(module.contents);
-                downloadBtn = {
-                    hidden: true,
-                    icon: 'ion-ios-cloud-download-outline',
-                    label: 'mm.core.download',
-                    action: function(e) {
-                        e.preventDefault();
-                        e.stopPropagation();
+        self.isEnabled = function() {
+        return $mmaModBook.isPluginEnabled();
+    };
+        self.getController = function(module, courseid) {
+        return function($scope) {
+            var downloadBtn,
+                refreshBtn,
+                revision = $mmFilepool.getRevisionFromFileList(module.contents),
+                timemodified = $mmFilepool.getTimemodifiedFromFileList(module.contents);
+            downloadBtn = {
+                hidden: true,
+                icon: 'ion-ios-cloud-download-outline',
+                label: 'mm.core.download',
+                action: function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    $mmaModBook.prefetchContent(module).catch(function() {
+                        if (!$scope.$$destroyed) {
+                            $mmUtil.showErrorModal('mm.core.errordownloading', true);
+                        }
+                    });
+                }
+            };
+            refreshBtn = {
+                icon: 'ion-android-refresh',
+                label: 'mm.core.refresh',
+                hidden: true,
+                action: function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    $mmaModBook.invalidateContent(module.id).finally(function() {
                         $mmaModBook.prefetchContent(module).catch(function() {
                             if (!$scope.$$destroyed) {
                                 $mmUtil.showErrorModal('mm.core.errordownloading', true);
                             }
                         });
-                    }
-                };
-                refreshBtn = {
-                    icon: 'ion-android-refresh',
-                    label: 'mm.core.refresh',
-                    hidden: true,
-                    action: function(e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        $mmaModBook.invalidateContent(module.id).finally(function() {
-                            $mmaModBook.prefetchContent(module).catch(function() {
-                                if (!$scope.$$destroyed) {
-                                    $mmUtil.showErrorModal('mm.core.errordownloading', true);
-                                }
-                            });
-                        });
-                    }
-                };
-                $scope.title = module.name;
-                $scope.icon = $mmCourse.getModuleIconSrc('book');
-                $scope.buttons = [downloadBtn, refreshBtn];
-                $scope.spinner = false;
-                $scope.action = function(e) {
-                    if (e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                    }
-                    $state.go('site.mod_book', {module: module, courseid: courseid});
-                };
-                function showStatus(status) {
-                    if (status) {
-                        $scope.spinner = status === mmCoreDownloading;
-                        downloadBtn.hidden = status !== mmCoreNotDownloaded;
-                        refreshBtn.hidden = status !== mmCoreOutdated && status !== mmCoreDownloaded;
-                    }
+                    });
                 }
-                var statusObserver = $mmEvents.on(mmCoreEventPackageStatusChanged, function(data) {
-                    if (data.siteid === $mmSite.getId() && data.componentId === module.id && data.component === mmaModBookComponent) {
-                        showStatus(data.status);
-                    }
-                });
-                $mmCoursePrefetchDelegate.getModuleStatus(module, courseid, revision, timemodified).then(showStatus);
-                $scope.$on('$destroy', function() {
-                    statusObserver && statusObserver.off && statusObserver.off();
-                });
             };
-        };
-        return self;
-    };
-        self.linksHandler = function() {
-        var self = {};
-                function isEnabled(siteId, courseId) {
-            return $mmaModBook.isPluginEnabled(siteId).then(function(enabled) {
-                if (!enabled) {
-                    return false;
+            $scope.title = module.name;
+            $scope.icon = $mmCourse.getModuleIconSrc('book');
+            $scope.buttons = [downloadBtn, refreshBtn];
+            $scope.spinner = false;
+            $scope.action = function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                $state.go('site.mod_book', {module: module, courseid: courseid});
+            };
+            function showStatus(status) {
+                if (status) {
+                    $scope.spinner = status === mmCoreDownloading;
+                    downloadBtn.hidden = status !== mmCoreNotDownloaded;
+                    refreshBtn.hidden = status !== mmCoreOutdated && status !== mmCoreDownloaded;
                 }
-                return courseId || $mmCourse.canGetModuleWithoutCourseId(siteId);
+            }
+            var statusObserver = $mmEvents.on(mmCoreEventPackageStatusChanged, function(data) {
+                if (data.siteid === $mmSite.getId() && data.componentId === module.id && data.component === mmaModBookComponent) {
+                    showStatus(data.status);
+                }
             });
-        }
-                self.getActions = function(siteIds, url, courseId) {
-            if (typeof self.handles(url) != 'undefined') {
-                return $mmContentLinksHelper.treatModuleIndexUrl(siteIds, url, isEnabled, courseId);
-            }
-            return $q.when([]);
+            $mmCoursePrefetchDelegate.getModuleStatus(module, courseid, revision, timemodified).then(showStatus);
+            $scope.$on('$destroy', function() {
+                statusObserver && statusObserver.off && statusObserver.off();
+            });
         };
-                self.handles = function(url) {
-            var position = url.indexOf('/mod/book/view.php');
-            if (position > -1) {
-                return url.substr(0, position);
-            }
-        };
-        return self;
     };
     return self;
 }]);
@@ -13177,17 +12297,14 @@ angular.module('mm.addons.mod_chat')
     };
 }]);
 angular.module('mm.addons.mod_chat')
-.factory('$mmaModChat', ["$q", "$mmSite", "$mmUser", "$mmSitesManager", function($q, $mmSite, $mmUser, $mmSitesManager) {
+.factory('$mmaModChat', ["$q", "$mmSite", "$mmUser", function($q, $mmSite, $mmUser) {
     var self = {};
-        self.isPluginEnabled = function(siteId) {
-        siteId = siteId || $mmSite.getId();
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            return  site.wsAvailable('mod_chat_get_chats_by_courses') &&
-                    site.wsAvailable('mod_chat_login_user') &&
-                    site.wsAvailable('mod_chat_get_chat_users') &&
-                    site.wsAvailable('mod_chat_send_chat_message') &&
-                    site.wsAvailable('mod_chat_get_chat_latest_messages');
-        });
+        self.isPluginEnabled = function() {
+        return  $mmSite.wsAvailable('mod_chat_get_chats_by_courses') &&
+                $mmSite.wsAvailable('mod_chat_login_user') &&
+                $mmSite.wsAvailable('mod_chat_get_chat_users') &&
+                $mmSite.wsAvailable('mod_chat_send_chat_message') &&
+                $mmSite.wsAvailable('mod_chat_get_chat_latest_messages');
     };
         self.getChat = function(courseid, cmid, refresh) {
         var params = {
@@ -13282,47 +12399,19 @@ angular.module('mm.addons.mod_chat')
     return self;
 }]);
 angular.module('mm.addons.mod_chat')
-.factory('$mmaModChatHandlers', ["$mmCourse", "$mmaModChat", "$state", "$mmContentLinksHelper", "$q", function($mmCourse, $mmaModChat, $state, $mmContentLinksHelper, $q) {
+.factory('$mmaModChatCourseContentHandler', ["$mmCourse", "$mmaModChat", "$state", function($mmCourse, $mmaModChat, $state) {
     var self = {};
-        self.courseContent = function() {
-        var self = {};
-                self.isEnabled = function() {
-            return $mmaModChat.isPluginEnabled();
-        };
-                self.getController = function(module, courseid) {
-            return function($scope) {
-                $scope.title = module.name;
-                $scope.icon = $mmCourse.getModuleIconSrc('chat');
-                $scope.action = function(e) {
-                    $state.go('site.mod_chat', {module: module, courseid: courseid});
-                };
+        self.isEnabled = function() {
+        return $mmaModChat.isPluginEnabled();
+    };
+        self.getController = function(module, courseid) {
+        return function($scope) {
+            $scope.title = module.name;
+            $scope.icon = $mmCourse.getModuleIconSrc('chat');
+            $scope.action = function(e) {
+                $state.go('site.mod_chat', {module: module, courseid: courseid});
             };
         };
-        return self;
-    };
-        self.linksHandler = function() {
-        var self = {};
-                function isEnabled(siteId, courseId) {
-            return $mmaModChat.isPluginEnabled(siteId).then(function(enabled) {
-                if (!enabled) {
-                    return false;
-                }
-                return courseId || $mmCourse.canGetModuleWithoutCourseId(siteId);
-            });
-        }
-                self.getActions = function(siteIds, url, courseId) {
-            if (typeof self.handles(url) != 'undefined') {
-                return $mmContentLinksHelper.treatModuleIndexUrl(siteIds, url, isEnabled, courseId);
-            }
-            return $q.when([]);
-        };
-                self.handles = function(url) {
-            var position = url.indexOf('/mod/chat/view.php');
-            if (position > -1) {
-                return url.substr(0, position);
-            }
-        };
-        return self;
     };
     return self;
 }]);
@@ -13463,7 +12552,7 @@ angular.module('mm.addons.mod_choice')
 }]);
 
 angular.module('mm.addons.mod_choice')
-.factory('$mmaModChoice', ["$q", "$mmSite", "$mmSitesManager", "mmaModChoiceResultsAfterAnswer", "mmaModChoiceResultsAfterClose", "mmaModChoiceResultsAlways", function($q, $mmSite, $mmSitesManager, mmaModChoiceResultsAfterAnswer, mmaModChoiceResultsAfterClose,
+.factory('$mmaModChoice', ["$q", "$mmSite", "mmaModChoiceResultsAfterAnswer", "mmaModChoiceResultsAfterClose", "mmaModChoiceResultsAlways", function($q, $mmSite, mmaModChoiceResultsAfterAnswer, mmaModChoiceResultsAfterClose,
             mmaModChoiceResultsAlways) {
     var self = {};
         self.canStudentSeeResults = function(choice, hasAnswered) {
@@ -13496,14 +12585,11 @@ angular.module('mm.addons.mod_choice')
         self.isDeleteResponsesEnabled = function() {
         return $mmSite.wsAvailable('mod_choice_delete_choice_responses');
     };
-        self.isPluginEnabled = function(siteId) {
-        siteId = siteId || $mmSite.getId();
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            return  site.wsAvailable('mod_choice_get_choice_options') &&
-                    site.wsAvailable('mod_choice_get_choice_results') &&
-                    site.wsAvailable('mod_choice_get_choices_by_courses') &&
-                    site.wsAvailable('mod_choice_submit_choice_response');
-        });
+        self.isPluginEnabled = function() {
+        return  $mmSite.wsAvailable('mod_choice_get_choice_options') &&
+                $mmSite.wsAvailable('mod_choice_get_choice_results') &&
+                $mmSite.wsAvailable('mod_choice_get_choices_by_courses') &&
+                $mmSite.wsAvailable('mod_choice_submit_choice_response');
     };
         self.getChoice = function(courseid, cmid) {
         var params = {
@@ -13584,47 +12670,19 @@ angular.module('mm.addons.mod_choice')
 }]);
 
 angular.module('mm.addons.mod_choice')
-.factory('$mmaModChoiceHandlers', ["$mmCourse", "$mmaModChoice", "$state", "$mmContentLinksHelper", "$q", function($mmCourse, $mmaModChoice, $state, $mmContentLinksHelper, $q) {
+.factory('$mmaModChoiceCourseContentHandler', ["$mmCourse", "$mmaModChoice", "$state", function($mmCourse, $mmaModChoice, $state) {
     var self = {};
-        self.courseContent = function() {
-        var self = {};
-                self.isEnabled = function() {
-            return $mmaModChoice.isPluginEnabled();
-        };
-                self.getController = function(module, courseid) {
-            return function($scope) {
-                $scope.title = module.name;
-                $scope.icon = $mmCourse.getModuleIconSrc('choice');
-                $scope.action = function(e) {
-                    $state.go('site.mod_choice', {module: module, courseid: courseid});
-                };
+        self.isEnabled = function() {
+        return $mmaModChoice.isPluginEnabled();
+    };
+        self.getController = function(module, courseid) {
+        return function($scope) {
+            $scope.title = module.name;
+            $scope.icon = $mmCourse.getModuleIconSrc('choice');
+            $scope.action = function(e) {
+                $state.go('site.mod_choice', {module: module, courseid: courseid});
             };
         };
-        return self;
-    };
-        self.linksHandler = function() {
-        var self = {};
-                function isEnabled(siteId, courseId) {
-            return $mmaModChoice.isPluginEnabled(siteId).then(function(enabled) {
-                if (!enabled) {
-                    return false;
-                }
-                return courseId || $mmCourse.canGetModuleWithoutCourseId(siteId);
-            });
-        }
-                self.getActions = function(siteIds, url, courseId) {
-            if (typeof self.handles(url) != 'undefined') {
-                return $mmContentLinksHelper.treatModuleIndexUrl(siteIds, url, isEnabled, courseId);
-            }
-            return $q.when([]);
-        };
-                self.handles = function(url) {
-            var position = url.indexOf('/mod/choice/view.php');
-            if (position > -1) {
-                return url.substr(0, position);
-            }
-        };
-        return self;
     };
     return self;
 }]);
@@ -13646,7 +12704,7 @@ angular.module('mm.addons.mod_folder')
         }
     }
     function fetchFolder() {
-        return $mmCourse.getModule(module.id, courseid, sectionid).then(function(module) {
+        return $mmCourse.getModule(courseid, module.id, sectionid).then(function(module) {
             showModuleData(module);
         }, function(error) {
             if (error) {
@@ -13681,6 +12739,71 @@ angular.module('mm.addons.mod_folder')
             });
         });
     };
+}]);
+
+angular.module('mm.addons.mod_folder')
+.factory('$mmaModFolderCourseContentHandler', ["$mmCourse", "$mmaModFolder", "$mmEvents", "$state", "$mmSite", "$mmUtil", "$mmFilepool", "$mmCoursePrefetchDelegate", "mmCoreDownloading", "mmCoreNotDownloaded", "mmCoreOutdated", "mmCoreEventPackageStatusChanged", "mmaModFolderComponent", function($mmCourse, $mmaModFolder, $mmEvents, $state, $mmSite, $mmUtil, $mmFilepool,
+            $mmCoursePrefetchDelegate, mmCoreDownloading, mmCoreNotDownloaded, mmCoreOutdated, mmCoreEventPackageStatusChanged,
+            mmaModFolderComponent) {
+    var self = {};
+        self.isEnabled = function() {
+        return true;
+    };
+        self.getController = function(module, courseid, sectionid) {
+        return function($scope) {
+            var downloadBtn,
+                refreshBtn,
+                revision = $mmFilepool.getRevisionFromFileList(module.contents),
+                timemodified = $mmFilepool.getTimemodifiedFromFileList(module.contents);
+            function prefetchFolder(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                $mmaModFolder.prefetchContent(module).catch(function() {
+                    if (!$scope.$$destroyed) {
+                        $mmUtil.showErrorModal('mm.core.errordownloading', true);
+                    }
+                });
+            }
+            downloadBtn = {
+                hidden: true,
+                icon: 'ion-ios-cloud-download-outline',
+                label: 'mm.core.download',
+                action: prefetchFolder
+            };
+            refreshBtn = {
+                hidden: true,
+                icon: 'ion-android-refresh',
+                label: 'mm.core.refresh',
+                action: prefetchFolder
+            };
+            $scope.icon = $mmCourse.getModuleIconSrc('folder');
+            $scope.title = module.name;
+            $scope.buttons = [downloadBtn, refreshBtn];
+            $scope.spinner = false;
+            $scope.action = function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                $state.go('site.mod_folder', {module: module, courseid: courseid, sectionid: sectionid});
+            };
+            function showStatus(status) {
+                if (status) {
+                    $scope.spinner = status === mmCoreDownloading;
+                    downloadBtn.hidden = status !== mmCoreNotDownloaded;
+                    refreshBtn.hidden = status !== mmCoreOutdated;
+                }
+            }
+            var statusObserver = $mmEvents.on(mmCoreEventPackageStatusChanged, function(data) {
+                if (data.siteid === $mmSite.getId() && data.componentId === module.id && data.component === mmaModFolderComponent) {
+                    showStatus(data.status);
+                }
+            });
+            $mmCoursePrefetchDelegate.getModuleStatus(module, courseid, revision, timemodified).then(showStatus);
+            $scope.$on('$destroy', function() {
+                statusObserver && statusObserver.off && statusObserver.off();
+            });
+        };
+    };
+    return self;
 }]);
 
 angular.module('mm.addons.mod_folder')
@@ -13769,99 +12892,6 @@ angular.module('mm.addons.mod_folder')
 }]);
 
 angular.module('mm.addons.mod_folder')
-.factory('$mmaModFolderHandlers', ["$mmCourse", "$mmaModFolder", "$mmEvents", "$state", "$mmSite", "$mmUtil", "$mmFilepool", "$mmCoursePrefetchDelegate", "mmCoreDownloading", "mmCoreNotDownloaded", "mmCoreOutdated", "mmCoreEventPackageStatusChanged", "mmaModFolderComponent", "$mmContentLinksHelper", "$q", function($mmCourse, $mmaModFolder, $mmEvents, $state, $mmSite, $mmUtil, $mmFilepool,
-            $mmCoursePrefetchDelegate, mmCoreDownloading, mmCoreNotDownloaded, mmCoreOutdated, mmCoreEventPackageStatusChanged,
-            mmaModFolderComponent, $mmContentLinksHelper, $q) {
-    var self = {};
-        self.courseContent = function() {
-        var self = {};
-                self.isEnabled = function() {
-            return true;
-        };
-                self.getController = function(module, courseid, sectionid) {
-            return function($scope) {
-                var downloadBtn,
-                    refreshBtn,
-                    revision = $mmFilepool.getRevisionFromFileList(module.contents),
-                    timemodified = $mmFilepool.getTimemodifiedFromFileList(module.contents);
-                function prefetchFolder(e) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    $mmaModFolder.prefetchContent(module).catch(function() {
-                        if (!$scope.$$destroyed) {
-                            $mmUtil.showErrorModal('mm.core.errordownloading', true);
-                        }
-                    });
-                }
-                downloadBtn = {
-                    hidden: true,
-                    icon: 'ion-ios-cloud-download-outline',
-                    label: 'mm.core.download',
-                    action: prefetchFolder
-                };
-                refreshBtn = {
-                    hidden: true,
-                    icon: 'ion-android-refresh',
-                    label: 'mm.core.refresh',
-                    action: prefetchFolder
-                };
-                $scope.icon = $mmCourse.getModuleIconSrc('folder');
-                $scope.title = module.name;
-                $scope.buttons = [downloadBtn, refreshBtn];
-                $scope.spinner = false;
-                $scope.action = function(e) {
-                    if (e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                    }
-                    $state.go('site.mod_folder', {module: module, courseid: courseid, sectionid: sectionid});
-                };
-                function showStatus(status) {
-                    if (status) {
-                        $scope.spinner = status === mmCoreDownloading;
-                        downloadBtn.hidden = status !== mmCoreNotDownloaded;
-                        refreshBtn.hidden = status !== mmCoreOutdated;
-                    }
-                }
-                var statusObserver = $mmEvents.on(mmCoreEventPackageStatusChanged, function(data) {
-                    if (data.siteid === $mmSite.getId() && data.componentId === module.id && data.component === mmaModFolderComponent) {
-                        showStatus(data.status);
-                    }
-                });
-                $mmCoursePrefetchDelegate.getModuleStatus(module, courseid, revision, timemodified).then(showStatus);
-                $scope.$on('$destroy', function() {
-                    statusObserver && statusObserver.off && statusObserver.off();
-                });
-            };
-        };
-        return self;
-    };
-        self.linksHandler = function() {
-        var self = {};
-                function isEnabled(siteId, courseId) {
-            if (courseId) {
-                return $q.when(true);
-            }
-            return $mmCourse.canGetModuleWithoutCourseId(siteId);
-        }
-                self.getActions = function(siteIds, url, courseId) {
-            if (typeof self.handles(url) != 'undefined') {
-                return $mmContentLinksHelper.treatModuleIndexUrl(siteIds, url, isEnabled, courseId);
-            }
-            return $q.when([]);
-        };
-                self.handles = function(url) {
-            var position = url.indexOf('/mod/folder/view.php');
-            if (position > -1) {
-                return url.substr(0, position);
-            }
-        };
-        return self;
-    };
-    return self;
-}]);
-
-angular.module('mm.addons.mod_folder')
 .factory('$mmaModFolderPrefetchHandler', ["$mmaModFolder", "$mmSite", "mmaModFolderComponent", function($mmaModFolder, $mmSite, mmaModFolderComponent) {
     var self = {};
     self.component = mmaModFolderComponent;
@@ -13887,7 +12917,7 @@ angular.module('mm.addons.mod_forum')
 .controller('mmaModForumDiscussionCtrl', ["$q", "$scope", "$stateParams", "$mmaModForum", "$mmSite", "$mmUtil", "$translate", "$ionicScrollDelegate", "mmaModForumComponent", function($q, $scope, $stateParams, $mmaModForum, $mmSite, $mmUtil, $translate,
             $ionicScrollDelegate, mmaModForumComponent) {
     var discussionid = $stateParams.discussionid,
-        courseid = $stateParams.cid,
+        courseid = $stateParams.courseid,
         scrollView;
     $scope.component = mmaModForumComponent;
     $scope.courseid = courseid;
@@ -14068,7 +13098,7 @@ angular.module('mm.addons.mod_forum')
 angular.module('mm.addons.mod_forum')
 .controller('mmaModForumNewDiscussionCtrl', ["$scope", "$stateParams", "$mmGroups", "$q", "$mmaModForum", "$mmEvents", "$ionicPlatform", "$mmUtil", "$ionicHistory", "$translate", "mmaModForumNewDiscussionEvent", function($scope, $stateParams, $mmGroups, $q, $mmaModForum, $mmEvents, $ionicPlatform,
             $mmUtil, $ionicHistory, $translate, mmaModForumNewDiscussionEvent) {
-    var courseid = $stateParams.cid,
+    var courseid = $stateParams.courseid,
         forumid = $stateParams.forumid,
         cmid = $stateParams.cmid;
     $scope.newdiscussion = {
@@ -14274,7 +13304,7 @@ angular.module('mm.addons.mod_forum')
 }]);
 
 angular.module('mm.addons.mod_forum')
-.factory('$mmaModForum', ["$q", "$mmSite", "$mmUser", "$mmGroups", "$translate", "$mmSitesManager", "mmaModForumDiscPerPage", function($q, $mmSite, $mmUser, $mmGroups, $translate, $mmSitesManager, mmaModForumDiscPerPage) {
+.factory('$mmaModForum', ["$q", "$mmSite", "$mmUser", "$mmGroups", "$translate", "mmaModForumDiscPerPage", function($q, $mmSite, $mmUser, $mmGroups, $translate, mmaModForumDiscPerPage) {
     var self = {};
         function getCanAddDiscussionCacheKey(forumid, groupid) {
         return getCommonCanAddDiscussionCacheKey(forumid) + ':' + groupid;
@@ -14349,13 +13379,10 @@ angular.module('mm.addons.mod_forum')
         self.isCanAddDiscussionAvailable = function() {
         return $mmSite.wsAvailable('mod_forum_can_add_discussion');
     };
-        self.isPluginEnabled = function(siteId) {
-        siteId = siteId || $mmSite.getId();
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            return  site.wsAvailable('mod_forum_get_forums_by_courses') &&
-                    site.wsAvailable('mod_forum_get_forum_discussions_paginated') &&
-                    site.wsAvailable('mod_forum_get_forum_discussion_posts');
-        });
+        self.isPluginEnabled = function() {
+        return  $mmSite.wsAvailable('mod_forum_get_forums_by_courses') &&
+                $mmSite.wsAvailable('mod_forum_get_forum_discussions_paginated') &&
+                $mmSite.wsAvailable('mod_forum_get_forum_discussion_posts');
     };
         self.formatDiscussionsGroups = function(cmid, discussions) {
         discussions = angular.copy(discussions);
@@ -14503,7 +13530,7 @@ angular.module('mm.addons.mod_forum')
 }]);
 
 angular.module('mm.addons.mod_forum')
-.factory('$mmaModForumHandlers', ["$mmCourse", "$mmaModForum", "$state", "$mmUtil", "$mmContentLinksHelper", "$q", function($mmCourse, $mmaModForum, $state, $mmUtil, $mmContentLinksHelper, $q) {
+.factory('$mmaModForumHandlers', ["$mmCourse", "$mmaModForum", "$state", "$mmSite", function($mmCourse, $mmaModForum, $state, $mmSite) {
     var self = {};
         self.courseContent = function() {
         var self = {};
@@ -14515,10 +13542,8 @@ angular.module('mm.addons.mod_forum')
                 $scope.title = module.name;
                 $scope.icon = $mmCourse.getModuleIconSrc('forum');
                 $scope.action = function(e) {
-                    if (e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                    }
+                    e.preventDefault();
+                    e.stopPropagation();
                     $state.go('site.mod_forum', {module: module, courseid: courseid});
                 };
             };
@@ -14526,591 +13551,27 @@ angular.module('mm.addons.mod_forum')
         return self;
     };
         self.linksHandler = function() {
-        var self = {},
-            patterns = ['/mod/forum/view.php', '/mod/forum/discuss.php'];
-                function isIndexEnabled(siteId, courseId) {
-            return $mmaModForum.isPluginEnabled(siteId).then(function(enabled) {
-                if (!enabled) {
-                    return false;
-                }
-                return courseId || $mmCourse.canGetModuleWithoutCourseId(siteId);
-            });
-        }
-                function isDiscEnabled(siteId) {
-            return $mmaModForum.isPluginEnabled(siteId);
-        }
-                self.getActions = function(siteIds, url, courseId) {
-            if (url.indexOf(patterns[0]) > -1) {
-                return $mmContentLinksHelper.treatModuleIndexUrl(siteIds, url, isIndexEnabled, courseId);
-            } else if (url.indexOf(patterns[1]) > -1) {
-                var params = $mmUtil.extractUrlParams(url);
-                if (params.d != 'undefined') {
-                    courseId = courseId || params.courseid || params.cid;
-                    return $mmContentLinksHelper.filterSupportedSites(siteIds, isDiscEnabled, false, courseId).then(function(ids) {
-                        if (!ids.length) {
-                            return [];
-                        } else {
-                            return [{
-                                message: 'mm.core.view',
-                                icon: 'ion-eye',
-                                sites: ids,
-                                action: function(siteId) {
-                                    var stateParams = {
-                                        discussionid: parseInt(params.d, 10),
-                                        cid: courseId
-                                    };
-                                    $mmContentLinksHelper.goInSite('site.mod_forum-discussion', stateParams, siteId);
-                                }
-                            }];
-                        }
-                    });
-                }
-            }
-            return $q.when([]);
-        };
-                self.handles = function(url) {
-            for (var i = 0; i < patterns.length; i++) {
-                var position = url.indexOf(patterns[i]);
-                if (position > -1) {
-                    return url.substr(0, position);
-                }
-            }
-        };
-        return self;
-    };
-    return self;
-}]);
-
-angular.module('mm.addons.mod_glossary')
-.controller('mmaModGlossaryEntryCtrl', ["$scope", "$stateParams", "$mmaModGlossary", "$translate", "mmUserProfileState", function($scope, $stateParams, $mmaModGlossary, $translate,
-        mmUserProfileState) {
-    var entry = $stateParams.entry || {},
-        courseid = $stateParams.cid || 0,
-        glossary;
-    if (!courseid) {
-        notifyErrorOccured();
-        return;
-    }
-    $scope.refreshEntry = function() {
-        refreshEntry().finally(function() {
-            $scope.$broadcast('scroll.refreshComplete');
-        });
-    };
-    $mmaModGlossary.getGlossaryById(courseid, entry.glossaryid).then(function(gloss) {
-        glossary = gloss;
-        var displayFormat = glossary.displayformat;
-        $scope.title = entry.concept;
-        $scope.entry = entry;
-        $scope.courseid = courseid;
-        $scope.userStateName = mmUserProfileState;
-        if (displayFormat == 'fullwithauthor' || displayFormat == 'encyclopedia') {
-            $scope.showAuthor = true;
-            $scope.showDate = true;
-        } else if (displayFormat == 'fullwithoutauthor') {
-            $scope.showAuthor = false;
-            $scope.showDate = true;
-        } else {
-            $scope.showAuthor = false;
-            $scope.showDate = false;
-        }
-        $scope.loaded = true;
-        $mmaModGlossary.logEntryView(entry.id);
-    }).catch(function() {
-        notifyErrorOccured();
-    });
-    function fetchEntry() {
-        return $mmaModGlossary.getEntry(entry.id).then(function(result) {
-            $scope.entry = result.entry;
-            $scope.title = result.entry.concept;
-        });
-    }
-    function refreshEntry() {
-        return $mmaModGlossary.invalidateEntry(entry.id).then(function() {
-            return fetchEntry();
-        });
-    }
-    function notifyErrorOccured() {
-        $scope.title = $translate.instant('mm.core.error');
-        $scope.entry = false;
-        $scope.loaded = true;
-    }
-}]);
-
-angular.module('mm.addons.mod_glossary')
-.controller('mmaModGlossaryIndexCtrl', ["$q", "$scope", "$stateParams", "$ionicPopover", "$mmUtil", "$mmaModGlossary", "$ionicScrollDelegate", function($q, $scope, $stateParams, $ionicPopover, $mmUtil, $mmaModGlossary,
-        $ionicScrollDelegate) {
-    var module = $stateParams.module || {},
-        courseId = $stateParams.courseid,
-        glossary,
-        noop = function(){},
-        limitFrom = 0,
-        limitNum = 25,
-        popover,
-        viewMode,  
-        fetchMode = 'letter_all',      
-        fetchFunction,
-        fetchInvalidate,
-        fetchArguments,
-        popoverScope = $scope.$new(true),
-        browseModes = [
-            {
-                key: 'letter_all',
-                langkey: 'mma.mod_glossary.byalphabet'
-            },
-            {
-                key: 'search',
-                langkey: 'mma.mod_glossary.bysearch'
-            }
-        ];
-    $scope.title = module.name;
-    $scope.description = module.description;
-    $scope.externalUrl = module.url;
-    $scope.courseid = courseId;
-    $scope.loaded = false;
-    $scope.entries = [];
-    $scope.getDivider = noop;
-    $scope.showDivider = noop;
-    $scope.canLoadMore = false;
-    $scope.searchData = {
-        searchQuery: ''
-    };
-    $scope.loadMoreEntries = function() {
-        loadMoreEntries().finally(function() {
-            $scope.$broadcast('scroll.infiniteScrollComplete');
-        });
-    };
-    $scope.refreshEntries = function() {
-        refreshEntries().finally(function() {
-            $scope.$broadcast('scroll.refreshComplete');
-        });
-    };
-    $scope.pickMode = function(e) {
-        popoverScope.data.selectedMode = fetchMode;
-        popover.show(e);
-    };
-    $scope.search = function(query) {
-        fetchArguments = [glossary.id, query, 1, 'CONCEPT', 'ASC'];
-        fetchEntries();
-    };
-    $scope.trackBy = function(entry) {
-        return fetchMode + ':' + entry.id;
-    };
-    $mmaModGlossary.getGlossary(courseId, module.id).then(function(mod) {
-        glossary = mod;
-        if (glossary.browsemodes.indexOf('date') >= 0) {
-            browseModes.push({key: 'newest_first', langkey: 'mma.mod_glossary.bynewestfirst'});
-            browseModes.push({key: 'recently_updated', langkey: 'mma.mod_glossary.byrecentlyupdated'});
-        }
-        if (glossary.browsemodes.indexOf('author') >= 0) {
-            browseModes.push({key: 'author_all', langkey: 'mma.mod_glossary.byauthor'});
-        }
-        popoverScope.modes = browseModes;
-        popoverScope.modePicked = function(mode) {
-            $ionicScrollDelegate.$getByHandle('mmaModGlossaryIndex').scrollTop(false);
-            if (switchMode(mode)) {
-                $scope.loaded = false;
-                fetchEntries().finally(function() {
-                    $scope.loaded = true;
-                });
-            } else {
-                $scope.loaded = true;
-                $scope.entries = [];
-                $scope.canLoadMore = false;
-                $scope.showNoEntries = false;
-            }
-            popover.hide();
-        };
-        popoverScope.data = { selectedMode: '' };
-        $ionicPopover.fromTemplateUrl('addons/mod_glossary/templates/mode_picker.html', {
-            scope: popoverScope
-        }).then(function(po) {
-            popover = po;
-        });
-        $scope.$on('$destroy', function() {
-            popover.remove();
-            popoverScope.$destroy();
-        });
-        switchMode();
-        fetchEntries().then(function() {
-            $mmaModGlossary.logView(glossary.id, viewMode);
-        }).finally(function() {
-            $scope.loaded = true;
-        });
-    }).catch(function() {
-        $mmUtil.showErrorModal('mma.mod_glossary.errorloadingglossary', true);
-        $scope.loaded = true;
-    });
-    function fetchEntries(append) {
-        if (!append) {
-            limitFrom = 0;
-        }
-        var args = angular.extend([], fetchArguments);
-        args.push(limitFrom);
-        args.push(limitNum);
-        return fetchFunction.apply(this, args).then(function(result) {
-            if (append) {
-                $scope.entries = $scope.entries.concat(result.entries);
-            } else {
-                $scope.entries = result.entries;
-            }
-            $scope.canLoadMore = (limitFrom + limitNum) < result.count;
-            $scope.showNoEntries = result.count <= 0;
-        }).catch(function() {
-            $mmUtil.showErrorModal('mma.mod_glossary.errorloadingentries', true);
-            return $q.reject();
-        });
-    }
-    function refreshEntries() {
-        if (fetchMode == 'search' && !$scope.searchQuery) {
-            return $q.when();
-        }
-        var args = angular.extend([], fetchArguments);
-        return fetchInvalidate.apply(this, args).then(function() {
-            limitFrom = 0;
-            return fetchEntries();
-        });
-    }
-    function loadMoreEntries() {
-        limitFrom += limitNum;
-        return fetchEntries(true);
-    }
-    function switchMode(mode) {
-        if (mode == fetchMode) {
-            return false;
-        }
-        var instantFetch = true;
-        fetchMode = mode;
-        $scope.isSearch = false;
-        if (mode == 'author_all') {
-            viewMode = 'author';
-            fetchFunction = $mmaModGlossary.getEntriesByAuthor;
-            fetchInvalidate = $mmaModGlossary.invalidateEntriesByAuthor;
-            fetchArguments = [glossary.id, 'ALL', 'LASTNAME', 'ASC'];
-            $scope.getDivider = function(entry) {
-                return entry.userfullname;
-            };
-            $scope.showDivider = function(entry, previous) {
-                if (typeof previous === 'undefined') {
-                    return true;
-                }
-                return entry.userid != previous.userid;
-            };
-        } else if (mode == 'newest_first') {
-            viewMode = 'date';
-            fetchFunction = $mmaModGlossary.getEntriesByDate;
-            fetchInvalidate = $mmaModGlossary.invalidateEntriesByDate;
-            fetchArguments = [glossary.id, 'CREATION', 'DESC'];
-            $scope.getDivider = noop;
-            $scope.showDivider = function() { return false; };
-        } else if (mode == 'recently_updated') {
-            viewMode = 'date';
-            fetchFunction = $mmaModGlossary.getEntriesByDate;
-            fetchInvalidate = $mmaModGlossary.invalidateEntriesByDate;
-            fetchArguments = [glossary.id, 'UPDATE', 'DESC'];
-            $scope.getDivider = noop;
-            $scope.showDivider = function() { return false; };
-        } else if (mode == 'search') {
-            viewMode = 'search';
-            fetchFunction = $mmaModGlossary.getEntriesBySearch;
-            fetchInvalidate = $mmaModGlossary.invalidateEntriesBySearch;
-            fetchArguments = false;
-            $scope.isSearch = true;
-            $scope.getDivider = noop;
-            $scope.showDivider = function() { return false; };
-            instantFetch = false;
-        } else {
-            viewMode = 'letter';
-            fetchMode = 'letter_all';
-            fetchFunction = $mmaModGlossary.getEntriesByLetter;
-            fetchInvalidate = $mmaModGlossary.invalidateEntriesByLetter;
-            fetchArguments = [glossary.id, 'ALL'];
-            $scope.getDivider = function(entry) {
-                return entry.concept.substr(0, 1).toUpperCase();
-            };
-            $scope.showDivider = function(entry, previous) {
-                if (typeof previous === 'undefined') {
-                    return true;
-                }
-                return $scope.getDivider(entry) != $scope.getDivider(previous);
-            };
-        }
-        return instantFetch;
-    }
-}]);
-
-angular.module('mm.addons.mod_glossary')
-.factory('$mmaModGlossary', ["$mmSite", "$q", "$mmSitesManager", function($mmSite, $q, $mmSitesManager) {
-    var self = {};
-        self._getCourseGlossariesCacheKey = function(courseId) {
-        return 'mmaModGlossary:courseGlossaries:' + courseId;
-    };
-        self.getCourseGlossaries = function(courseId) {
-        var params = {
-                courseids: [courseId]
-            },
-            preSets = {
-                cacheKey: self._getCourseGlossariesCacheKey(courseId)
-            };
-        return $mmSite.read('mod_glossary_get_glossaries_by_courses', params, preSets).then(function(result) {
-            return result.glossaries;
-        });
-    };
-        self.invalidateCourseGlossaries = function(courseId) {
-        var key = self._getCourseGlossariesCacheKey(courseId);
-        return $mmSite.invalidateWsCacheForKey(key);
-    };
-        self._getEntriesByAuthorCacheKey = function(glossaryId, letter, field, sort) {
-        return 'mmaModGlossary:entriesByAuthor:' + glossaryId + ":" + letter + ":" + field + ":" + sort;
-    };
-        self.getEntriesByAuthor = function(glossaryId, letter, field, sort, from, limit) {
-        var params = {
-                id: glossaryId,
-                letter: letter,
-                field: field,
-                sort: sort,
-                from: from,
-                limit: limit
-            },
-            preSets = {
-                cacheKey: self._getEntriesByAuthorCacheKey(glossaryId, letter, field, sort)
-            };
-        return $mmSite.read('mod_glossary_get_entries_by_author', params, preSets);
-    };
-        self.invalidateEntriesByAuthor = function(glossaryId, letter, field, sort) {
-        var key = self._getEntriesByAuthorCacheKey(glossaryId, letter, field, sort);
-        return $mmSite.invalidateWsCacheForKey(key);
-    };
-        self._getEntriesByDateCacheKey = function(glossaryId, order, sort) {
-        return 'mmaModGlossary:entriesByDate:' + glossaryId + ":" + order + ":" + sort;
-    };
-        self.getEntriesByDate = function(glossaryId, order, sort, from, limit) {
-        var params = {
-                id: glossaryId,
-                order: order,
-                sort: sort,
-                from: from,
-                limit: limit
-            },
-            preSets = {
-                cacheKey: self._getEntriesByDateCacheKey(glossaryId, order, sort)
-            };
-        return $mmSite.read('mod_glossary_get_entries_by_date', params, preSets);
-    };
-        self.invalidateEntriesByDate = function(glossaryId, order, sort) {
-        var key = self._getEntriesByDateCacheKey(glossaryId, order, sort);
-        return $mmSite.invalidateWsCacheForKey(key);
-    };
-        self._getEntriesByLetterCacheKey = function(glossaryId, letter) {
-        return 'mmaModGlossary:entriesByLetter:' + glossaryId + ":" + letter;
-    };
-        self.getEntriesByLetter = function(glossaryId, letter, from, limit) {
-        var params = {
-                id: glossaryId,
-                letter: letter,
-                from: from,
-                limit: limit
-            },
-            preSets = {
-                cacheKey: self._getEntriesByLetterCacheKey(glossaryId, letter)
-            };
-        return $mmSite.read('mod_glossary_get_entries_by_letter', params, preSets);
-    };
-        self.invalidateEntriesByLetter = function(glossaryId, letter) {
-        var key = self._getEntriesByLetterCacheKey(glossaryId, letter);
-        return $mmSite.invalidateWsCacheForKey(key);
-    };
-        self._getEntriesBySearchCacheKey = function(glossaryId, query, fullsearch, order, sort) {
-        return 'mmaModGlossary:entriesBySearch:' + glossaryId + ":" + fullsearch + ":" + order + ":" + sort + ":" + query;
-    };
-        self.getEntriesBySearch = function(glossaryId, query, fullsearch, order, sort, from, limit) {
-        var params = {
-                id: glossaryId,
-                query: query,
-                fullsearch: fullsearch,
-                order: order,
-                sort: sort,
-                from: from,
-                limit: limit
-            },
-            preSets = {
-                cacheKey: self._getEntriesBySearchCacheKey(glossaryId, query, fullsearch, order, sort)
-            };
-        return $mmSite.read('mod_glossary_get_entries_by_search', params, preSets);
-    };
-        self.invalidateEntriesBySearch = function(glossaryId, query, fullsearch, order, sort) {
-        var key = self._getEntriesBySearchCacheKey(glossaryId, query, fullsearch, order, sort);
-        return $mmSite.invalidateWsCacheForKey(key);
-    };
-        self._getEntryCacheKey = function(id) {
-        return 'mmaModGlossary:getEntry:' + id;
-    };
-        self.getEntry = function(id, siteId) {
-        siteId = siteId || $mmSite.getId();
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            var params = {
-                    id: id
-                },
-                preSets = {
-                    cacheKey: self._getEntryCacheKey(id)
-                };
-            return site.read('mod_glossary_get_entry_by_id', params, preSets);
-        });
-    };
-        self.invalidateEntry = function(id) {
-        var key = self._getEntryCacheKey(id);
-        return $mmSite.invalidateWsCacheForKey(key);
-    };
-        self.getGlossary = function(courseId, cmid) {
-        return self.getCourseGlossaries(courseId).then(function(glossaries) {
-            var result = $q.reject();
-            angular.forEach(glossaries, function(glossary) {
-                if (glossary.coursemodule == cmid) {
-                    result = glossary;
-                }
-            });
-            return result;
-        });
-    };
-        self.getGlossaryById = function(courseId, id) {
-        return self.getCourseGlossaries(courseId).then(function(glossaries) {
-            var result = $q.reject();
-            angular.forEach(glossaries, function(glossary) {
-                if (glossary.id == id) {
-                    result = glossary;
-                }
-            });
-            return result;
-        });
-    };
-        self.isPluginEnabled = function(siteId) {
-        siteId = siteId || $mmSite.getId();
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            return site.wsAvailable('mod_glossary_get_glossaries_by_courses');
-        });
-    };
-        self.logView = function(id, mode) {
-        var params = {
-            id: id,
-            mode: mode
-        };
-        return $mmSite.write('mod_glossary_view_glossary', params);
-    };
-        self.logEntryView = function(id) {
-        var params = {
-            id: id
-        };
-        return $mmSite.write('mod_glossary_view_entry', params);
-    };
-    return self;
-}]);
-
-angular.module('mm.addons.mod_glossary')
-.factory('$mmaModGlossaryHandlers', ["$mmCourse", "$mmaModGlossary", "$state", "$q", "$mmContentLinksHelper", "$mmUtil", "$mmCourseHelper", function($mmCourse, $mmaModGlossary, $state, $q, $mmContentLinksHelper, $mmUtil,
-            $mmCourseHelper) {
-    var self = {};
-        self.courseContent = function() {
         var self = {};
                 self.isEnabled = function() {
-            return $mmaModGlossary.isPluginEnabled();
+            return $mmaModForum.isPluginEnabled();
         };
-                self.getController = function(module, courseid) {
-            return function($scope) {
-                $scope.icon = $mmCourse.getModuleIconSrc('glossary');
-                $scope.title = module.name;
-                $scope.action = function(e) {
-                    if (e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                    }
-                    $state.go('site.mod_glossary', {module: module, courseid: courseid});
-                };
-            };
-        };
-        return self;
-    };
-        self.linksHandler = function() {
-        var self = {},
-            patterns = ['/mod/glossary/view.php', '/mod/glossary/showentry.php'];
-                function isIndexEnabled(siteId, courseId) {
-            return $mmaModGlossary.isPluginEnabled(siteId).then(function(enabled) {
-                if (!enabled) {
-                    return false;
-                }
-                return courseId || $mmCourse.canGetModuleWithoutCourseId(siteId);
-            });
-        }
-                function isEntryEnabled(siteId, courseId) {
-            return $mmaModGlossary.isPluginEnabled(siteId).then(function(enabled) {
-                if (!enabled) {
-                    return false;
-                }
-                return courseId || $mmCourse.canGetModuleByInstance(siteId);
-            });
-        }
-        function getEntry(entryId, siteId) {
-            return $mmaModGlossary.getEntry(entryId, siteId).then(function(result) {
-                return result.entry;
-            }).catch(function(error) {
-                if (error) {
-                    $mmUtil.showErrorModal(error);
-                } else {
-                    $mmUtil.showErrorModal('mma.mod_glossary.errorloadingentry', true);
-                }
-                return $q.reject();
-            });
-        }
-                function treatEntryLink(siteIds, url, courseId) {
-            var params = $mmUtil.extractUrlParams(url);
-            if (params.eid != 'undefined') {
-                courseId = courseId || params.courseid || params.cid;
-                return $mmContentLinksHelper.filterSupportedSites(siteIds, isEntryEnabled, false, courseId).then(function(ids) {
-                    if (!ids.length) {
-                        return [];
-                    }
+                self.getActions = function(url, courseid) {
+            if (courseid && $mmSite.containsUrl(url) && url.indexOf('/mod/forum/') > -1) {
+                var matches = url.match(/discuss\.php\?d=([^#]*)/);
+                if (matches && typeof matches[1] != 'undefined') {
                     return [{
                         message: 'mm.core.view',
                         icon: 'ion-eye',
-                        sites: ids,
-                        action: function(siteId) {
-                            var modal = $mmUtil.showModalLoading();
-                            return getEntry(parseInt(params.eid, 10), siteId).then(function(entry) {
-                                var promise;
-                                if (courseId) {
-                                    promise = $q.when(courseId);
-                                } else {
-                                    promise = $mmCourseHelper.getModuleCourseIdByInstance(entry.glossaryid, 'glossary', siteId);
-                                }
-                                return promise.then(function(courseId) {
-                                    var stateParams = {
-                                        entry: entry,
-                                        entryid: entry.id,
-                                        cid: courseId
-                                    };
-                                    $mmContentLinksHelper.goInSite('site.mod_glossary-entry', stateParams, siteId);
-                                });
-                            }).finally(function() {
-                                modal.dismiss();
+                        action: function() {
+                            $state.go('site.mod_forum-discussion', {
+                                courseid: courseid,
+                                discussionid: matches[1]
                             });
                         }
                     }];
-                });
-            }
-        }
-                self.getActions = function(siteIds, url, courseId) {
-            if (url.indexOf(patterns[0]) > -1) {
-                return $mmContentLinksHelper.treatModuleIndexUrl(siteIds, url, isIndexEnabled, courseId);
-            } else if (url.indexOf(patterns[1]) > -1) {
-                return treatEntryLink(siteIds, url, courseId);
-            }
-            return $q.when([]);
-        };
-                self.handles = function(url) {
-            for (var i = 0; i < patterns.length; i++) {
-                var position = url.indexOf(patterns[i]);
-                if (position > -1) {
-                    return url.substr(0, position);
                 }
             }
+            return [];
         };
         return self;
     };
@@ -15200,111 +13661,81 @@ angular.module('mm.addons.mod_imscp')
 }]);
 
 angular.module('mm.addons.mod_imscp')
-.factory('$mmaModImscpHandlers', ["$mmCourse", "$mmaModImscp", "$mmEvents", "$state", "$mmSite", "$mmUtil", "$mmFilepool", "$mmCoursePrefetchDelegate", "mmCoreDownloading", "mmCoreNotDownloaded", "mmCoreOutdated", "mmCoreEventPackageStatusChanged", "mmaModImscpComponent", "$mmContentLinksHelper", "$q", function($mmCourse, $mmaModImscp, $mmEvents, $state, $mmSite, $mmUtil, $mmFilepool,
+.factory('$mmaModImscpCourseContentHandler', ["$mmCourse", "$mmaModImscp", "$mmEvents", "$state", "$mmSite", "$mmUtil", "$mmFilepool", "$mmCoursePrefetchDelegate", "mmCoreDownloading", "mmCoreNotDownloaded", "mmCoreOutdated", "mmCoreEventPackageStatusChanged", "mmaModImscpComponent", function($mmCourse, $mmaModImscp, $mmEvents, $state, $mmSite, $mmUtil, $mmFilepool,
             $mmCoursePrefetchDelegate, mmCoreDownloading, mmCoreNotDownloaded, mmCoreOutdated, mmCoreEventPackageStatusChanged,
-            mmaModImscpComponent, $mmContentLinksHelper, $q) {
+            mmaModImscpComponent) {
     var self = {};
-        self.courseContent = function() {
-        var self = {};
-                self.isEnabled = function() {
-            return $mmaModImscp.isPluginEnabled();
-        };
-                self.getController = function(module, courseid) {
-            return function($scope) {
-                var downloadBtn,
-                    refreshBtn,
-                    revision = $mmFilepool.getRevisionFromFileList(module.contents),
-                    timemodified = $mmFilepool.getTimemodifiedFromFileList(module.contents);
-                downloadBtn = {
-                    hidden: true,
-                    icon: 'ion-ios-cloud-download-outline',
-                    label: 'mm.core.download',
-                    action: function(e) {
-                        e.preventDefault();
-                        e.stopPropagation();
+        self.isEnabled = function() {
+        return $mmaModImscp.isPluginEnabled();
+    };
+        self.getController = function(module, courseid) {
+        return function($scope) {
+            var downloadBtn,
+                refreshBtn,
+                revision = $mmFilepool.getRevisionFromFileList(module.contents),
+                timemodified = $mmFilepool.getTimemodifiedFromFileList(module.contents);
+            downloadBtn = {
+                hidden: true,
+                icon: 'ion-ios-cloud-download-outline',
+                label: 'mm.core.download',
+                action: function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    $mmaModImscp.prefetchContent(module).catch(function() {
+                        if (!$scope.$$destroyed) {
+                            $mmUtil.showErrorModal('mm.core.errordownloading', true);
+                        }
+                    });
+                }
+            };
+            refreshBtn = {
+                icon: 'ion-android-refresh',
+                label: 'mm.core.refresh',
+                hidden: true,
+                action: function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    $mmaModImscp.invalidateContent(module.id).then(function() {
                         $mmaModImscp.prefetchContent(module).catch(function() {
                             if (!$scope.$$destroyed) {
                                 $mmUtil.showErrorModal('mm.core.errordownloading', true);
                             }
                         });
-                    }
-                };
-                refreshBtn = {
-                    icon: 'ion-android-refresh',
-                    label: 'mm.core.refresh',
-                    hidden: true,
-                    action: function(e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        $mmaModImscp.invalidateContent(module.id).then(function() {
-                            $mmaModImscp.prefetchContent(module).catch(function() {
-                                if (!$scope.$$destroyed) {
-                                    $mmUtil.showErrorModal('mm.core.errordownloading', true);
-                                }
-                            });
-                        });
-                    }
-                };
-                $scope.title = module.name;
-                $scope.icon = $mmCourse.getModuleIconSrc('imscp');
-                $scope.buttons = [downloadBtn, refreshBtn];
-                $scope.spinner = false;
-                $scope.action = function(e) {
-                    if (e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                    }
-                    $state.go('site.mod_imscp', {module: module, courseid: courseid});
-                };
-                function showStatus(status) {
-                    if (status) {
-                        $scope.spinner = status === mmCoreDownloading;
-                        downloadBtn.hidden = status !== mmCoreNotDownloaded;
-                        refreshBtn.hidden = status !== mmCoreOutdated;
-                    }
+                    });
                 }
-                var statusObserver = $mmEvents.on(mmCoreEventPackageStatusChanged, function(data) {
-                    if (data.siteid === $mmSite.getId() && data.componentId === module.id && data.component === mmaModImscpComponent) {
-                        showStatus(data.status);
-                    }
-                });
-                $mmCoursePrefetchDelegate.getModuleStatus(module, courseid, revision, timemodified).then(showStatus);
-                $scope.$on('$destroy', function() {
-                    statusObserver && statusObserver.off && statusObserver.off();
-                });
             };
-        };
-        return self;
-    };
-        self.linksHandler = function() {
-        var self = {};
-                function isEnabled(siteId, courseId) {
-            return $mmaModImscp.isPluginEnabled(siteId).then(function(enabled) {
-                if (!enabled) {
-                    return false;
+            $scope.title = module.name;
+            $scope.icon = $mmCourse.getModuleIconSrc('imscp');
+            $scope.buttons = [downloadBtn, refreshBtn];
+            $scope.spinner = false;
+            $scope.action = function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                $state.go('site.mod_imscp', {module: module, courseid: courseid});
+            };
+            function showStatus(status) {
+                if (status) {
+                    $scope.spinner = status === mmCoreDownloading;
+                    downloadBtn.hidden = status !== mmCoreNotDownloaded;
+                    refreshBtn.hidden = status !== mmCoreOutdated;
                 }
-                return courseId || $mmCourse.canGetModuleWithoutCourseId(siteId);
+            }
+            var statusObserver = $mmEvents.on(mmCoreEventPackageStatusChanged, function(data) {
+                if (data.siteid === $mmSite.getId() && data.componentId === module.id && data.component === mmaModImscpComponent) {
+                    showStatus(data.status);
+                }
             });
-        }
-                self.getActions = function(siteIds, url, courseId) {
-            if (typeof self.handles(url) != 'undefined') {
-                return $mmContentLinksHelper.treatModuleIndexUrl(siteIds, url, isEnabled, courseId);
-            }
-            return $q.when([]);
+            $mmCoursePrefetchDelegate.getModuleStatus(module, courseid, revision, timemodified).then(showStatus);
+            $scope.$on('$destroy', function() {
+                statusObserver && statusObserver.off && statusObserver.off();
+            });
         };
-                self.handles = function(url) {
-            var position = url.indexOf('/mod/imscp/view.php');
-            if (position > -1) {
-                return url.substr(0, position);
-            }
-        };
-        return self;
     };
     return self;
 }]);
 
 angular.module('mm.addons.mod_imscp')
-.factory('$mmaModImscp', ["$mmFilepool", "$mmSite", "$mmFS", "$log", "$q", "$sce", "$mmApp", "$mmSitesManager", "mmaModImscpComponent", function($mmFilepool, $mmSite, $mmFS, $log, $q, $sce, $mmApp, $mmSitesManager, mmaModImscpComponent) {
+.factory('$mmaModImscp', ["$mmFilepool", "$mmSite", "$mmFS", "$log", "$q", "$sce", "$mmApp", "mmaModImscpComponent", function($mmFilepool, $mmSite, $mmFS, $log, $q, $sce, $mmApp, mmaModImscpComponent) {
     $log = $log.getInstance('$mmaModImscp');
     var self = {},
         currentDirPath;
@@ -15451,12 +13882,9 @@ angular.module('mm.addons.mod_imscp')
         self.isFileDownloadable = function(file) {
         return file.type === 'file' && !self.checkSpecialFiles(file.filename);
     };
-        self.isPluginEnabled = function(siteId) {
-        siteId = siteId || $mmSite.getId();
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            var version = site.getInfo().version;
-            return version && (parseInt(version) >= 2015051100) && site.canDownloadFiles();
-        });
+        self.isPluginEnabled = function() {
+        var version = $mmSite.getInfo().version;
+        return version && (parseInt(version) >= 2015051100) && $mmSite.canDownloadFiles();
     };
         self.logView = function(id) {
         if (id) {
@@ -15507,56 +13935,26 @@ angular.module('mm.core.course')
 }]);
 
 angular.module('mm.addons.mod_label')
-.factory('$mmaModLabelHandlers', ["$mmText", "$translate", "$state", "$mmContentLinksHelper", "$q", "$mmCourse", function($mmText, $translate, $state, $mmContentLinksHelper, $q, $mmCourse) {
+.factory('$mmaModLabelCourseContentHandler', ["$mmText", "$translate", "$state", function($mmText, $translate, $state) {
     var self = {};
-        self.courseContent = function() {
-        var self = {};
-                self.isEnabled = function() {
-            return true;
-        };
-                self.getController = function(module) {
-            return function($scope) {
-                var title = $mmText.shortenText($mmText.cleanTags(module.description).trim(), 128);
-                if (title.length <= 0) {
-                    $translate('mma.mod_label.taptoview').then(function(taptoview) {
-                        $scope.title = '<span class="mma-mod_label-empty">' + taptoview + '</span>';
-                    });
-                } else {
-                    $scope.title = title;
-                }
-                $scope.icon = false;
-                $scope.action = function(e) {
-                    if (e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                    }
-                    $state.go('site.mod_label', {description: module.description});
-                };
+        self.isEnabled = function() {
+        return true;
+    };
+        self.getController = function(module) {
+        return function($scope) {
+            var title = $mmText.shortenText($mmText.cleanTags(module.description).trim(), 128);
+            if (title.length <= 0) {
+                $translate('mma.mod_label.taptoview').then(function(taptoview) {
+                    $scope.title = '<span class="mma-mod_label-empty">' + taptoview + '</span>';
+                });
+            } else {
+                $scope.title = title;
+            }
+            $scope.icon = false;
+            $scope.action = function(e) {
+                $state.go('site.mod_label', {description: module.description});
             };
         };
-        return self;
-    };
-        self.linksHandler = function() {
-        var self = {};
-                function isEnabled(siteId, courseId) {
-            if (courseId) {
-                return $q.when(true);
-            }
-            return $mmCourse.canGetModuleWithoutCourseId(siteId);
-        }
-                self.getActions = function(siteIds, url, courseId) {
-            if (typeof self.handles(url) != 'undefined') {
-                return $mmContentLinksHelper.treatModuleIndexUrl(siteIds, url, isEnabled, courseId);
-            }
-            return $q.when([]);
-        };
-                self.handles = function(url) {
-            var position = url.indexOf('/mod/label/view.php');
-            if (position > -1) {
-                return url.substr(0, position);
-            }
-        };
-        return self;
     };
     return self;
 }]);
@@ -15618,92 +14016,64 @@ angular.module('mm.addons.mod_lti')
 }]);
 
 angular.module('mm.addons.mod_lti')
-.factory('$mmaModLtiHandlers', ["$mmCourse", "$mmaModLti", "$state", "$mmSite", "$mmFilepool", "$mmApp", "$mmUtil", "mmaModLtiComponent", "$mmContentLinksHelper", "$q", function($mmCourse, $mmaModLti, $state, $mmSite, $mmFilepool, $mmApp, $mmUtil,
-            mmaModLtiComponent, $mmContentLinksHelper, $q) {
+.factory('$mmaModLtiCourseContentHandler', ["$mmCourse", "$mmaModLti", "$state", "$mmSite", "$mmFilepool", "$mmApp", "$mmUtil", "mmaModLtiComponent", function($mmCourse, $mmaModLti, $state, $mmSite, $mmFilepool, $mmApp, $mmUtil,
+            mmaModLtiComponent) {
     var self = {};
-        self.courseContent = function() {
-        var self = {};
-                self.isEnabled = function() {
-            return $mmaModLti.isPluginEnabled();
-        };
-                self.getController = function(module, courseid) {
-            return function($scope) {
-                $scope.title = module.name;
-                $scope.icon = $mmCourse.getModuleIconSrc('lti');
-                $scope.action = function() {
-                    $state.go('site.mod_lti', {module: module, courseid: courseid});
-                };
-                var promise = $mmaModLti.getLti(courseid, module.id);
-                promise.then(function(ltidata) {
-                    var icon = ltidata.secureicon || ltidata.icon;
-                    if (icon) {
-                        $mmFilepool.downloadUrl($mmSite.getId(), icon, false, mmaModLtiComponent, module.id).then(function(url) {
-                            $scope.icon = url;
-                        }).catch(function() {
-                            if ($mmApp.isOnline()) {
-                                $scope.icon = icon;
-                            }
-                        });
-                    }
-                });
-                $scope.buttons = [{
-                    icon: 'ion-link',
-                    label: 'mma.mod_lti.launchactivity',
-                    action: function(e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        var modal = $mmUtil.showModalLoading('mm.core.loading', true);
-                        promise.then(function(ltidata) {
-                            return $mmaModLti.getLtiLaunchData(ltidata.id).then(function(launchdata) {
-                                $mmaModLti.logView(ltidata.id).then(function() {
-                                    $mmCourse.checkModuleCompletion(courseid, module.completionstatus);
-                                });
-                                return $mmaModLti.launch(launchdata.endpoint, launchdata.parameters);
-                            });
-                        }).catch(function(message) {
-                            if (message) {
-                                $mmUtil.showErrorModal(message);
-                            } else {
-                                $mmUtil.showErrorModal('mma.mod_lti.errorgetlti', true);
-                            }
-                        }).finally(function() {
-                            modal.dismiss();
-                        });
-                    }
-                }];
-            };
-        };
-        return self;
+        self.isEnabled = function() {
+        return $mmaModLti.isPluginEnabled();
     };
-        self.linksHandler = function() {
-        var self = {};
-                function isEnabled(siteId, courseId) {
-            return $mmaModLti.isPluginEnabled(siteId).then(function(enabled) {
-                if (!enabled) {
-                    return false;
+        self.getController = function(module, courseid) {
+        return function($scope) {
+            $scope.title = module.name;
+            $scope.icon = $mmCourse.getModuleIconSrc('lti');
+            $scope.action = function() {
+                $state.go('site.mod_lti', {module: module, courseid: courseid});
+            };
+            var promise = $mmaModLti.getLti(courseid, module.id);
+            promise.then(function(ltidata) {
+                var icon = ltidata.secureicon || ltidata.icon;
+                if (icon) {
+                    $mmFilepool.downloadUrl($mmSite.getId(), icon, false, mmaModLtiComponent, module.id).then(function(url) {
+                        $scope.icon = url;
+                    }).catch(function() {
+                        if ($mmApp.isOnline()) {
+                            $scope.icon = icon;
+                        }
+                    });
                 }
-                return courseId || $mmCourse.canGetModuleWithoutCourseId(siteId);
             });
-        }
-                self.getActions = function(siteIds, url, courseId) {
-            if (typeof self.handles(url) != 'undefined') {
-                return $mmContentLinksHelper.treatModuleIndexUrl(siteIds, url, isEnabled, courseId);
-            }
-            return $q.when([]);
+            $scope.buttons = [{
+                icon: 'ion-link',
+                label: 'mma.mod_lti.launchactivity',
+                action: function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    var modal = $mmUtil.showModalLoading('mm.core.loading', true);
+                    promise.then(function(ltidata) {
+                        return $mmaModLti.getLtiLaunchData(ltidata.id).then(function(launchdata) {
+                            $mmaModLti.logView(ltidata.id).then(function() {
+                                $mmCourse.checkModuleCompletion(courseid, module.completionstatus);
+                            });
+                            return $mmaModLti.launch(launchdata.endpoint, launchdata.parameters);
+                        });
+                    }).catch(function(message) {
+                        if (message) {
+                            $mmUtil.showErrorModal(message);
+                        } else {
+                            $mmUtil.showErrorModal('mma.mod_lti.errorgetlti', true);
+                        }
+                    }).finally(function() {
+                        modal.dismiss();
+                    });
+                }
+            }];
         };
-                self.handles = function(url) {
-            var position = url.indexOf('/mod/lti/view.php');
-            if (position > -1) {
-                return url.substr(0, position);
-            }
-        };
-        return self;
     };
     return self;
 }]);
 
 angular.module('mm.addons.mod_lti')
-.factory('$mmaModLti', ["$q", "$mmSite", "$mmFS", "$mmText", "$mmUtil", "$mmLang", "$mmSitesManager", function($q, $mmSite, $mmFS, $mmText, $mmUtil, $mmLang, $mmSitesManager) {
+.factory('$mmaModLti', ["$q", "$mmSite", "$mmFS", "$mmText", "$mmUtil", "$mmLang", function($q, $mmSite, $mmFS, $mmText, $mmUtil, $mmLang) {
     var self = {},
         launcherFileName = 'lti_launcher.html';
         self.deleteLauncher = function() {
@@ -15779,12 +14149,9 @@ angular.module('mm.addons.mod_lti')
         self.invalidateLtiLaunchData = function(id) {
         return $mmSite.invalidateWsCacheForKey(getLtiLaunchDataCacheKey(id));
     };
-        self.isPluginEnabled = function(siteId) {
-        siteId = siteId || $mmSite.getId();
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            return  site.wsAvailable('mod_lti_get_ltis_by_courses') &&
-                    site.wsAvailable('mod_lti_get_tool_launch_data');
-        });
+        self.isPluginEnabled = function() {
+        return  $mmSite.wsAvailable('mod_lti_get_ltis_by_courses') &&
+                $mmSite.wsAvailable('mod_lti_get_tool_launch_data');
     };
         self.launch = function(url, params) {
         if (!$mmUtil.isValidURL(url)) {
@@ -15851,111 +14218,81 @@ angular.module('mm.addons.mod_page')
 }]);
 
 angular.module('mm.addons.mod_page')
-.factory('$mmaModPageHandlers', ["$mmCourse", "$mmaModPage", "$mmEvents", "$state", "$mmSite", "$mmUtil", "$mmFilepool", "$mmCoursePrefetchDelegate", "mmCoreDownloading", "mmCoreNotDownloaded", "mmCoreOutdated", "mmCoreEventPackageStatusChanged", "mmaModPageComponent", "$mmContentLinksHelper", "$q", function($mmCourse, $mmaModPage, $mmEvents, $state, $mmSite, $mmUtil, $mmFilepool,
+.factory('$mmaModPageCourseContentHandler', ["$mmCourse", "$mmaModPage", "$mmEvents", "$state", "$mmSite", "$mmUtil", "$mmFilepool", "$mmCoursePrefetchDelegate", "mmCoreDownloading", "mmCoreNotDownloaded", "mmCoreOutdated", "mmCoreEventPackageStatusChanged", "mmaModPageComponent", function($mmCourse, $mmaModPage, $mmEvents, $state, $mmSite, $mmUtil, $mmFilepool,
             $mmCoursePrefetchDelegate, mmCoreDownloading, mmCoreNotDownloaded, mmCoreOutdated, mmCoreEventPackageStatusChanged,
-            mmaModPageComponent, $mmContentLinksHelper, $q) {
+            mmaModPageComponent) {
     var self = {};
-        self.courseContent = function() {
-        var self = {};
-                self.isEnabled = function() {
-            return $mmaModPage.isPluginEnabled();
-        };
-                self.getController = function(module, courseid) {
-            return function($scope) {
-                var downloadBtn,
-                    refreshBtn,
-                    revision = $mmFilepool.getRevisionFromFileList(module.contents),
-                    timemodified = $mmFilepool.getTimemodifiedFromFileList(module.contents);
-                downloadBtn = {
-                    hidden: true,
-                    icon: 'ion-ios-cloud-download-outline',
-                    label: 'mm.core.download',
-                    action: function(e) {
-                        e.preventDefault();
-                        e.stopPropagation();
+        self.isEnabled = function() {
+        return $mmSite.canDownloadFiles();
+    };
+        self.getController = function(module, courseid) {
+        return function($scope) {
+            var downloadBtn,
+                refreshBtn,
+                revision = $mmFilepool.getRevisionFromFileList(module.contents),
+                timemodified = $mmFilepool.getTimemodifiedFromFileList(module.contents);
+            downloadBtn = {
+                hidden: true,
+                icon: 'ion-ios-cloud-download-outline',
+                label: 'mm.core.download',
+                action: function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    $mmaModPage.prefetchContent(module).catch(function() {
+                        if (!$scope.$$destroyed) {
+                            $mmUtil.showErrorModal('mm.core.errordownloading', true);
+                        }
+                    });
+                }
+            };
+            refreshBtn = {
+                icon: 'ion-android-refresh',
+                label: 'mm.core.refresh',
+                hidden: true,
+                action: function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    $mmaModPage.invalidateContent(module.id).finally(function() {
                         $mmaModPage.prefetchContent(module).catch(function() {
                             if (!$scope.$$destroyed) {
                                 $mmUtil.showErrorModal('mm.core.errordownloading', true);
                             }
                         });
-                    }
-                };
-                refreshBtn = {
-                    icon: 'ion-android-refresh',
-                    label: 'mm.core.refresh',
-                    hidden: true,
-                    action: function(e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        $mmaModPage.invalidateContent(module.id).finally(function() {
-                            $mmaModPage.prefetchContent(module).catch(function() {
-                                if (!$scope.$$destroyed) {
-                                    $mmUtil.showErrorModal('mm.core.errordownloading', true);
-                                }
-                            });
-                        });
-                    }
-                };
-                $scope.title = module.name;
-                $scope.icon = $mmCourse.getModuleIconSrc('page');
-                $scope.buttons = [downloadBtn, refreshBtn];
-                $scope.spinner = false;
-                $scope.action = function(e) {
-                    if (e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                    }
-                    $state.go('site.mod_page', {module: module, courseid: courseid});
-                };
-                function showStatus(status) {
-                    if (status) {
-                        $scope.spinner = status === mmCoreDownloading;
-                        downloadBtn.hidden = status !== mmCoreNotDownloaded;
-                        refreshBtn.hidden = status !== mmCoreOutdated;
-                    }
+                    });
                 }
-                var statusObserver = $mmEvents.on(mmCoreEventPackageStatusChanged, function(data) {
-                    if (data.siteid === $mmSite.getId() && data.componentId === module.id && data.component === mmaModPageComponent) {
-                        showStatus(data.status);
-                    }
-                });
-                $mmCoursePrefetchDelegate.getModuleStatus(module, courseid, revision, timemodified).then(showStatus);
-                $scope.$on('$destroy', function() {
-                    statusObserver && statusObserver.off && statusObserver.off();
-                });
             };
-        };
-        return self;
-    };
-        self.linksHandler = function() {
-        var self = {};
-                function isEnabled(siteId, courseId) {
-            return $mmaModPage.isPluginEnabled(siteId).then(function(enabled) {
-                if (!enabled) {
-                    return false;
+            $scope.title = module.name;
+            $scope.icon = $mmCourse.getModuleIconSrc('page');
+            $scope.buttons = [downloadBtn, refreshBtn];
+            $scope.spinner = false;
+            $scope.action = function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                $state.go('site.mod_page', {module: module, courseid: courseid});
+            };
+            function showStatus(status) {
+                if (status) {
+                    $scope.spinner = status === mmCoreDownloading;
+                    downloadBtn.hidden = status !== mmCoreNotDownloaded;
+                    refreshBtn.hidden = status !== mmCoreOutdated;
                 }
-                return courseId || $mmCourse.canGetModuleWithoutCourseId(siteId);
+            }
+            var statusObserver = $mmEvents.on(mmCoreEventPackageStatusChanged, function(data) {
+                if (data.siteid === $mmSite.getId() && data.componentId === module.id && data.component === mmaModPageComponent) {
+                    showStatus(data.status);
+                }
             });
-        }
-                self.getActions = function(siteIds, url, courseId) {
-            if (typeof self.handles(url) != 'undefined') {
-                return $mmContentLinksHelper.treatModuleIndexUrl(siteIds, url, isEnabled, courseId);
-            }
-            return $q.when([]);
+            $mmCoursePrefetchDelegate.getModuleStatus(module, courseid, revision, timemodified).then(showStatus);
+            $scope.$on('$destroy', function() {
+                statusObserver && statusObserver.off && statusObserver.off();
+            });
         };
-                self.handles = function(url) {
-            var position = url.indexOf('/mod/page/view.php');
-            if (position > -1) {
-                return url.substr(0, position);
-            }
-        };
-        return self;
     };
     return self;
 }]);
 
 angular.module('mm.addons.mod_page')
-.factory('$mmaModPage', ["$mmFilepool", "$mmSite", "$mmFS", "$http", "$log", "$q", "$mmSitesManager", "mmaModPageComponent", function($mmFilepool, $mmSite, $mmFS, $http, $log, $q, $mmSitesManager, mmaModPageComponent) {
+.factory('$mmaModPage', ["$mmFilepool", "$mmSite", "$mmFS", "$http", "$log", "$q", "mmaModPageComponent", function($mmFilepool, $mmSite, $mmFS, $http, $log, $q, mmaModPageComponent) {
     $log = $log.getInstance('$mmaModPage');
     var self = {};
         self.downloadAllContent = function(module) {
@@ -16073,12 +14410,6 @@ angular.module('mm.addons.mod_page')
             encodedUrl = encodeURIComponent(url);
         return (filename === 'index.html' && (fileurl.indexOf(url) > 0 || fileurl.indexOf(encodedUrl) > 0 ));
     };
-        self.isPluginEnabled = function(siteId) {
-        siteId = siteId || $mmSite.getId();
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            return site.canDownloadFiles();
-        });
-    };
         self.logView = function(id) {
         if (id) {
             var params = {
@@ -16163,7 +14494,7 @@ angular.module('mm.addons.mod_resource')
                 });
             } else if ($mmaModResource.isDisplayedInline(module)) {
                 var downloadFailed = false;
-                return $mmaModResource.downloadAllContent(module).catch(function(err) {
+                $mmaModResource.downloadAllContent(module).catch(function(err) {
                     downloadFailed = true;
                 }).finally(function() {
                     $mmaModResource.getResourceHtml(module.contents, module.id).then(function(content) {
@@ -16185,13 +14516,13 @@ angular.module('mm.addons.mod_resource')
                 $scope.loaded = true;
                 $scope.mode = 'external';
                 $scope.open = function() {
-                    var modal = $mmUtil.showModalLoading();
+                    var modal = $mmUtil.showModalLoading('mm.core.downloading', true);
                     $mmaModResource.openFile(module.contents, module.id).then(function() {
                         $mmaModResource.logView(module.instance).then(function() {
                             $mmCourse.checkModuleCompletion(courseid, module.completionstatus);
                         });
                     }).catch(function(error) {
-                        if (error && typeof error == 'string') {
+                        if (error) {
                             $mmUtil.showErrorModal(error);
                         } else {
                             $mmUtil.showErrorModal('mma.mod_resource.errorwhileloadingthecontent', true);
@@ -16245,116 +14576,86 @@ angular.module('mm.addons.mod_resource')
 });
 
 angular.module('mm.addons.mod_resource')
-.factory('$mmaModResourceHandlers', ["$mmCourse", "$mmaModResource", "$mmEvents", "$state", "$mmSite", "$mmUtil", "$mmCoursePrefetchDelegate", "$mmFilepool", "$mmFS", "mmCoreDownloading", "mmCoreNotDownloaded", "mmCoreOutdated", "mmCoreEventPackageStatusChanged", "mmaModResourceComponent", "$q", "$mmContentLinksHelper", function($mmCourse, $mmaModResource, $mmEvents, $state, $mmSite, $mmUtil,
+.factory('$mmaModResourceCourseContentHandler', ["$mmCourse", "$mmaModResource", "$mmEvents", "$state", "$mmSite", "$mmUtil", "$mmCoursePrefetchDelegate", "$mmFilepool", "$mmFS", "mmCoreDownloading", "mmCoreNotDownloaded", "mmCoreOutdated", "mmCoreEventPackageStatusChanged", "mmaModResourceComponent", function($mmCourse, $mmaModResource, $mmEvents, $state, $mmSite, $mmUtil,
             $mmCoursePrefetchDelegate, $mmFilepool, $mmFS, mmCoreDownloading, mmCoreNotDownloaded, mmCoreOutdated,
-            mmCoreEventPackageStatusChanged, mmaModResourceComponent, $q, $mmContentLinksHelper) {
+            mmCoreEventPackageStatusChanged, mmaModResourceComponent) {
     var self = {};
-        self.courseContent = function() {
-        var self = {};
-                self.isEnabled = function() {
-            return $mmaModResource.isPluginEnabled();
-        };
-                self.getController = function(module, courseid) {
-            return function($scope) {
-                var downloadBtn,
-                    refreshBtn,
-                    revision = $mmFilepool.getRevisionFromFileList(module.contents),
-                    timemodified = $mmFilepool.getTimemodifiedFromFileList(module.contents);
-                downloadBtn = {
-                    hidden: true,
-                    icon: 'ion-ios-cloud-download-outline',
-                    label: 'mm.core.download',
-                    action: function(e) {
-                        e.preventDefault();
-                        e.stopPropagation();
+        self.isEnabled = function() {
+        return $mmSite.canDownloadFiles();
+    };
+        self.getController = function(module, courseid) {
+        return function($scope) {
+            var downloadBtn,
+                refreshBtn,
+                revision = $mmFilepool.getRevisionFromFileList(module.contents),
+                timemodified = $mmFilepool.getTimemodifiedFromFileList(module.contents);
+            downloadBtn = {
+                hidden: true,
+                icon: 'ion-ios-cloud-download-outline',
+                label: 'mm.core.download',
+                action: function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    $mmaModResource.prefetchContent(module).catch(function() {
+                        if (!$scope.$$destroyed) {
+                            $mmUtil.showErrorModal('mm.core.errordownloading', true);
+                        }
+                    });
+                }
+            };
+            refreshBtn = {
+                icon: 'ion-android-refresh',
+                label: 'mm.core.refresh',
+                hidden: true,
+                action: function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    $mmaModResource.invalidateContent(module.id).finally(function() {
                         $mmaModResource.prefetchContent(module).catch(function() {
                             if (!$scope.$$destroyed) {
                                 $mmUtil.showErrorModal('mm.core.errordownloading', true);
                             }
                         });
-                    }
-                };
-                refreshBtn = {
-                    icon: 'ion-android-refresh',
-                    label: 'mm.core.refresh',
-                    hidden: true,
-                    action: function(e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        $mmaModResource.invalidateContent(module.id).finally(function() {
-                            $mmaModResource.prefetchContent(module).catch(function() {
-                                if (!$scope.$$destroyed) {
-                                    $mmUtil.showErrorModal('mm.core.errordownloading', true);
-                                }
-                            });
-                        });
-                    }
-                };
-                $scope.title = module.name;
-                if (module.contents.length) {
-                    var filename = module.contents[0].filename,
-                        extension = $mmFS.getFileExtension(filename);
-                    if (module.contents.length == 1 || (extension != "html" && extension != "htm")) {
-                        $scope.icon = $mmFS.getFileIcon(filename);
-                    } else {
-                        $scope.icon = $mmCourse.getModuleIconSrc('resource');
-                    }
+                    });
+                }
+            };
+            $scope.title = module.name;
+            if (module.contents.length) {
+                var filename = module.contents[0].filename,
+                    extension = $mmFS.getFileExtension(filename);
+                if (module.contents.length == 1 || (extension != "html" && extension != "htm")) {
+                    $scope.icon = $mmFS.getFileIcon(filename);
                 } else {
                     $scope.icon = $mmCourse.getModuleIconSrc('resource');
                 }
-                $scope.buttons = [downloadBtn, refreshBtn];
-                $scope.spinner = false;
-                $scope.action = function(e) {
-                    if (e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                    }
-                    $state.go('site.mod_resource', {module: module, courseid: courseid});
-                };
-                function showStatus(status) {
-                    if (status) {
-                        $scope.spinner = status === mmCoreDownloading;
-                        downloadBtn.hidden = status !== mmCoreNotDownloaded;
-                        refreshBtn.hidden = status !== mmCoreOutdated;
-                    }
-                }
-                var statusObserver = $mmEvents.on(mmCoreEventPackageStatusChanged, function(data) {
-                    if (data.siteid === $mmSite.getId() && data.componentId === module.id &&
-                            data.component === mmaModResourceComponent) {
-                        showStatus(data.status);
-                    }
-                });
-                $mmCoursePrefetchDelegate.getModuleStatus(module, courseid, revision, timemodified).then(showStatus);
-                $scope.$on('$destroy', function() {
-                    statusObserver && statusObserver.off && statusObserver.off();
-                });
+            } else {
+                $scope.icon = $mmCourse.getModuleIconSrc('resource');
+            }
+            $scope.buttons = [downloadBtn, refreshBtn];
+            $scope.spinner = false;
+            $scope.action = function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                $state.go('site.mod_resource', {module: module, courseid: courseid});
             };
-        };
-        return self;
-    };
-        self.linksHandler = function() {
-        var self = {};
-                function isEnabled(siteId, courseId) {
-            return $mmaModResource.isPluginEnabled(siteId).then(function(enabled) {
-                if (!enabled) {
-                    return false;
+            function showStatus(status) {
+                if (status) {
+                    $scope.spinner = status === mmCoreDownloading;
+                    downloadBtn.hidden = status !== mmCoreNotDownloaded;
+                    refreshBtn.hidden = status !== mmCoreOutdated;
                 }
-                return courseId || $mmCourse.canGetModuleWithoutCourseId(siteId);
+            }
+            var statusObserver = $mmEvents.on(mmCoreEventPackageStatusChanged, function(data) {
+                if (data.siteid === $mmSite.getId() && data.componentId === module.id &&
+                        data.component === mmaModResourceComponent) {
+                    showStatus(data.status);
+                }
             });
-        }
-                self.getActions = function(siteIds, url, courseId) {
-            if (typeof self.handles(url) != 'undefined') {
-                return $mmContentLinksHelper.treatModuleIndexUrl(siteIds, url, isEnabled, courseId);
-            }
-            return $q.when([]);
+            $mmCoursePrefetchDelegate.getModuleStatus(module, courseid, revision, timemodified).then(showStatus);
+            $scope.$on('$destroy', function() {
+                statusObserver && statusObserver.off && statusObserver.off();
+            });
         };
-                self.handles = function(url) {
-            var position = url.indexOf('/mod/resource/view.php');
-            if (position > -1) {
-                return url.substr(0, position);
-            }
-        };
-        return self;
     };
     return self;
 }]);
@@ -16382,7 +14683,7 @@ angular.module('mm.addons.mod_resource')
 }]);
 
 angular.module('mm.addons.mod_resource')
-.factory('$mmaModResource', ["$mmFilepool", "$mmSite", "$mmUtil", "$mmFS", "$http", "$log", "$q", "$sce", "$mmApp", "$mmSitesManager", "mmaModResourceComponent", function($mmFilepool, $mmSite, $mmUtil, $mmFS, $http, $log, $q, $sce, $mmApp, $mmSitesManager,
+.factory('$mmaModResource', ["$mmFilepool", "$mmSite", "$mmUtil", "$mmFS", "$http", "$log", "$q", "$sce", "$mmApp", "mmaModResourceComponent", function($mmFilepool, $mmSite, $mmUtil, $mmFS, $http, $log, $q, $sce, $mmApp,
             mmaModResourceComponent) {
     $log = $log.getInstance('$mmaModResource');
     var self = {};
@@ -16545,12 +14846,6 @@ angular.module('mm.addons.mod_resource')
         self.isFileDownloadable = function(file) {
         return file.type === 'file';
     };
-        self.isPluginEnabled = function(siteId) {
-        siteId = siteId || $mmSite.getId();
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            return site.canDownloadFiles();
-        });
-    };
         self.logView = function(id) {
         if (id) {
             var params = {
@@ -16564,15 +14859,10 @@ angular.module('mm.addons.mod_resource')
         if (!contents || !contents.length) {
             return $q.reject();
         }
-        var files = [contents[0]],
-            siteId = $mmSite.getId(),
-            revision = $mmFilepool.getRevisionFromFileList(files),
-            timeMod = $mmFilepool.getTimemodifiedFromFileList(files),
+        var url = contents[0].fileurl,
             promise;
         if ($mmFS.isAvailable()) {
-            promise = $mmFilepool.downloadPackage(siteId, files, mmaModResourceComponent, moduleId, revision, timeMod).then(function() {
-                return $mmFilepool.getUrlByUrl(siteId, contents[0].fileurl, mmaModResourceComponent, moduleId, timeMod);
-            });
+            promise = $mmFilepool.downloadUrl($mmSite.getId(), url, false, mmaModResourceComponent, moduleId);
         } else {
             promise = $q.when($mmSite.fixPluginfileURL(url));
         }
@@ -16990,8 +15280,7 @@ angular.module('mm.addons.mod_scorm')
                     if (offline) {
                         promise = $mmaModScormHelper.createOfflineAttempt(scorm, result.attempt, attemptsData.online.length);
                     } else {
-                        promise = $mmaModScorm.getScormUserData(scorm.id, result.attempt, false, undefined, undefined, true)
-                                    .catch(function() {
+                        promise = $mmaModScorm.getScormUserData(scorm.id, result.attempt, false, undefined, true).catch(function() {
                             offline = true;
                             return $mmaModScormHelper.createOfflineAttempt(scorm, result.attempt, attemptsData.online.length);
                         });
@@ -17103,7 +15392,7 @@ angular.module('mm.addons.mod_scorm')
         }];
         return $mmaModScorm.saveTracks(scoId, attempt, tracks, offline, scorm).then(function() {
             if (!offline) {
-                $mmaModScorm.getAttemptCount(scorm.id, undefined, undefined, false, true);
+                $mmaModScorm.getAttemptCount(scorm.id, undefined, false, true);
             }
         });
     }
@@ -17170,6 +15459,84 @@ angular.module('mm.addons.mod_scorm')
         launchPrevObserver && launchPrevObserver.off && launchPrevObserver.off();
         goOfflineObserver && goOfflineObserver.off && goOfflineObserver.off();
     });
+}]);
+
+angular.module('mm.addons.mod_scorm')
+.factory('$mmaModScormCourseContentHandler', ["$mmCourse", "$mmaModScorm", "$mmEvents", "$state", "$mmSite", "$mmaModScormHelper", "$mmCoursePrefetchDelegate", "mmCoreDownloading", "mmCoreNotDownloaded", "mmCoreOutdated", "mmCoreEventPackageStatusChanged", "mmaModScormComponent", function($mmCourse, $mmaModScorm, $mmEvents, $state, $mmSite, $mmaModScormHelper,
+        $mmCoursePrefetchDelegate, mmCoreDownloading, mmCoreNotDownloaded, mmCoreOutdated, mmCoreEventPackageStatusChanged,
+        mmaModScormComponent) {
+    var self = {};
+        self.isEnabled = function() {
+        return $mmaModScorm.isPluginEnabled();
+    };
+        self.getController = function(module, courseid) {
+        return function($scope) {
+            var downloadBtn,
+                refreshBtn;
+            downloadBtn = {
+                hidden: true,
+                icon: 'ion-ios-cloud-download',
+                label: 'mm.core.download'
+            };
+            refreshBtn = {
+                icon: 'ion-android-refresh',
+                label: 'mm.core.refresh',
+                hidden: true
+            };
+            $scope.icon = $mmCourse.getModuleIconSrc('scorm');
+            $scope.title = module.name;
+            $scope.buttons = [downloadBtn, refreshBtn];
+            $scope.spinner = false;
+            $scope.action = function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                $state.go('site.mod_scorm', {module: module, courseid: courseid});
+            };
+            $mmaModScorm.getScorm(courseid, module.id, module.url).then(function(scorm) {
+                var revision = scorm.sha1hash,
+                    timemodified = 0;
+                function download() {
+                    $mmaModScormHelper.confirmDownload(scorm).then(function() {
+                        $mmaModScorm.prefetch(scorm).catch(function() {
+                            if (!$scope.$$destroyed) {
+                                $mmaModScormHelper.showDownloadError(scorm);
+                            }
+                        });
+                    });
+                }
+                downloadBtn.action = function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    download();
+                };
+                refreshBtn.action = function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    $mmaModScorm.invalidateContent(scorm.coursemodule).finally(function() {
+                        download();
+                    });
+                };
+                function showStatus(status) {
+                    if (status) {
+                        $scope.spinner = status === mmCoreDownloading;
+                        downloadBtn.hidden = status !== mmCoreNotDownloaded;
+                        refreshBtn.hidden = status !== mmCoreOutdated;
+                    }
+                }
+                var statusObserver = $mmEvents.on(mmCoreEventPackageStatusChanged, function(data) {
+                    if (data.siteid === $mmSite.getId() && data.componentId === scorm.coursemodule &&
+                            data.component === mmaModScormComponent) {
+                        showStatus(data.status);
+                    }
+                });
+                $mmCoursePrefetchDelegate.getModuleStatus(module, courseid, revision, timemodified).then(showStatus);
+                $scope.$on('$destroy', function() {
+                    statusObserver && statusObserver.off && statusObserver.off();
+                });
+            });
+        };
+    };
+    return self;
 }]);
 
 angular.module('mm.addons.mod_scorm')
@@ -17736,119 +16103,7 @@ angular.module('mm.addons.mod_scorm')
 }]);
 
 angular.module('mm.addons.mod_scorm')
-.factory('$mmaModScormHandlers', ["$mmCourse", "$mmaModScorm", "$mmEvents", "$state", "$mmSite", "$mmaModScormHelper", "$mmCoursePrefetchDelegate", "mmCoreDownloading", "mmCoreNotDownloaded", "mmCoreOutdated", "mmCoreEventPackageStatusChanged", "mmaModScormComponent", "$q", "$mmContentLinksHelper", function($mmCourse, $mmaModScorm, $mmEvents, $state, $mmSite, $mmaModScormHelper,
-        $mmCoursePrefetchDelegate, mmCoreDownloading, mmCoreNotDownloaded, mmCoreOutdated, mmCoreEventPackageStatusChanged,
-        mmaModScormComponent, $q, $mmContentLinksHelper) {
-    var self = {};
-        self.courseContent = function() {
-        var self = {};
-                self.isEnabled = function() {
-            return $mmaModScorm.isPluginEnabled();
-        };
-                self.getController = function(module, courseid) {
-            return function($scope) {
-                var downloadBtn,
-                    refreshBtn;
-                downloadBtn = {
-                    hidden: true,
-                    icon: 'ion-ios-cloud-download',
-                    label: 'mm.core.download'
-                };
-                refreshBtn = {
-                    icon: 'ion-android-refresh',
-                    label: 'mm.core.refresh',
-                    hidden: true
-                };
-                $scope.icon = $mmCourse.getModuleIconSrc('scorm');
-                $scope.title = module.name;
-                $scope.buttons = [downloadBtn, refreshBtn];
-                $scope.spinner = false;
-                $scope.action = function(e) {
-                    if (e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                    }
-                    $state.go('site.mod_scorm', {module: module, courseid: courseid});
-                };
-                $mmaModScorm.getScorm(courseid, module.id, module.url).then(function(scorm) {
-                    var revision = scorm.sha1hash,
-                        timemodified = 0;
-                    function download() {
-                        $mmaModScormHelper.confirmDownload(scorm).then(function() {
-                            $mmaModScorm.prefetch(scorm).catch(function() {
-                                if (!$scope.$$destroyed) {
-                                    $mmaModScormHelper.showDownloadError(scorm);
-                                }
-                            });
-                        });
-                    }
-                    downloadBtn.action = function(e) {
-                        if (e) {
-                            e.preventDefault();
-                            e.stopPropagation();
-                        }
-                        download();
-                    };
-                    refreshBtn.action = function(e) {
-                        if (e) {
-                            e.preventDefault();
-                            e.stopPropagation();
-                        }
-                        $mmaModScorm.invalidateContent(scorm.coursemodule).finally(function() {
-                            download();
-                        });
-                    };
-                    function showStatus(status) {
-                        if (status) {
-                            $scope.spinner = status === mmCoreDownloading;
-                            downloadBtn.hidden = status !== mmCoreNotDownloaded;
-                            refreshBtn.hidden = status !== mmCoreOutdated;
-                        }
-                    }
-                    var statusObserver = $mmEvents.on(mmCoreEventPackageStatusChanged, function(data) {
-                        if (data.siteid === $mmSite.getId() && data.componentId === scorm.coursemodule &&
-                                data.component === mmaModScormComponent) {
-                            showStatus(data.status);
-                        }
-                    });
-                    $mmCoursePrefetchDelegate.getModuleStatus(module, courseid, revision, timemodified).then(showStatus);
-                    $scope.$on('$destroy', function() {
-                        statusObserver && statusObserver.off && statusObserver.off();
-                    });
-                });
-            };
-        };
-        return self;
-    };
-        self.linksHandler = function() {
-        var self = {};
-                function isEnabled(siteId, courseId) {
-            return $mmaModScorm.isPluginEnabled(siteId).then(function(enabled) {
-                if (!enabled) {
-                    return false;
-                }
-                return courseId || $mmCourse.canGetModuleWithoutCourseId(siteId);
-            });
-        }
-                self.getActions = function(siteIds, url, courseId) {
-            if (typeof self.handles(url) != 'undefined') {
-                return $mmContentLinksHelper.treatModuleIndexUrl(siteIds, url, isEnabled, courseId);
-            }
-            return $q.when([]);
-        };
-                self.handles = function(url) {
-            var position = url.indexOf('/mod/scorm/view.php');
-            if (position > -1) {
-                return url.substr(0, position);
-            }
-        };
-        return self;
-    };
-    return self;
-}]);
-
-angular.module('mm.addons.mod_scorm')
-.factory('$mmaModScormHelper', ["$mmaModScorm", "$mmUtil", "$translate", "$q", "$mmaModScormOffline", "$mmaModScormSync", "$mmSite", function($mmaModScorm, $mmUtil, $translate, $q, $mmaModScormOffline, $mmaModScormSync, $mmSite) {
+.factory('$mmaModScormHelper', ["$mmaModScorm", "$mmUtil", "$translate", "$q", "$mmaModScormOffline", "$mmaModScormSync", function($mmaModScorm, $mmUtil, $translate, $q, $mmaModScormOffline, $mmaModScormSync) {
     var self = {},
         elementsToIgnore = ['status', 'score_raw', 'total_time', 'session_time', 'student_id', 'student_name', 'credit',
                             'mode', 'entry'];
@@ -17861,10 +16116,9 @@ angular.module('mm.addons.mod_scorm')
         });
         return message;
     };
-        self.convertAttemptToOffline = function(scorm, attempt, siteId) {
-        siteId = siteId || $mmSite.getId();
-        return $mmaModScorm.getScormUserData(scorm.id, attempt, false, siteId).then(function(onlineData) {
-            return $mmaModScormOffline.getScormUserData(siteId, scorm.id, attempt).catch(function() {
+        self.convertAttemptToOffline = function(scorm, attempt) {
+        return $mmaModScorm.getScormUserData(scorm.id, attempt).then(function(onlineData) {
+            return $mmaModScormOffline.getScormUserData(scorm.id, attempt).catch(function() {
             }).then(function(offlineData) {
                 var dataToStore = angular.copy(onlineData);
                 angular.forEach(dataToStore, function(sco) {
@@ -17881,15 +16135,14 @@ angular.module('mm.addons.mod_scorm')
                         sco.userdata = scoUserData;
                     }
                 });
-                return $mmaModScormOffline.createNewAttempt(siteId, scorm, undefined, attempt, dataToStore, onlineData);
+                return $mmaModScormOffline.createNewAttempt(scorm, undefined, attempt, dataToStore, onlineData);
             });
         }).catch(function() {
             return $q.reject($translate.instant('mma.mod_scorm.errorcreateofflineattempt'));
         });
     };
-        self.createOfflineAttempt = function(scorm, newAttempt, lastOnline, siteId) {
-        siteId = siteId || $mmSite.getId();
-        return self.searchOnlineAttemptUserData(scorm.id, lastOnline, siteId).then(function(userData) {
+        self.createOfflineAttempt = function(scorm, newAttempt, lastOnline) {
+        return self.searchOnlineAttemptUserData(scorm.id, lastOnline).then(function(userData) {
             angular.forEach(userData, function(sco) {
                 var filtered = {};
                 angular.forEach(sco.userdata, function(value, element) {
@@ -17899,7 +16152,7 @@ angular.module('mm.addons.mod_scorm')
                 });
                 sco.userdata = filtered;
             });
-            return $mmaModScormOffline.createNewAttempt(siteId, scorm, undefined, newAttempt, userData);
+            return $mmaModScormOffline.createNewAttempt(scorm, undefined, newAttempt, userData);
         }).catch(function() {
             return $q.reject($translate.instant('mma.mod_scorm.errorcreateofflineattempt'));
         });
@@ -17918,8 +16171,7 @@ angular.module('mm.addons.mod_scorm')
             return $mmUtil.confirmDownloadSize(size);
         });
     };
-        self.determineAttemptToContinue = function(scorm, attempts, siteId) {
-        siteId = siteId || $mmSite.getId();
+        self.determineAttemptToContinue = function(scorm, attempts) {
         var lastOnline,
             result = {
                 number: 0,
@@ -17939,7 +16191,7 @@ angular.module('mm.addons.mod_scorm')
         }
         if (lastOnline) {
             var hasOffline = attempts.offline.indexOf(lastOnline) > -1;
-            return $mmaModScorm.isAttemptIncomplete(scorm.id, lastOnline, hasOffline, false, siteId).then(function(incomplete) {
+            return $mmaModScorm.isAttemptIncomplete(scorm.id, lastOnline, hasOffline).then(function(incomplete) {
                 if (incomplete) {
                     result.number = lastOnline;
                     result.offline = hasOffline;
@@ -17953,13 +16205,12 @@ angular.module('mm.addons.mod_scorm')
             return $q.when(result);
         }
     };
-        self.getFirstSco = function(scormId, toc, organization, attempt, offline, siteId) {
-        siteId = siteId || $mmSite.getId();
+        self.getFirstSco = function(scormid, toc, organization, attempt, offline) {
         var promise;
         if (toc && toc.length) {
             promise = $q.when(toc);
         } else {
-            promise = $mmaModScorm.getScosWithData(scormId, organization, attempt, offline, false, siteId);
+            promise = $mmaModScorm.getScosWithData(scormid, organization, attempt, offline);
         }
         return promise.then(function(scos) {
             for (var i = 0; i < scos.length; i++) {
@@ -18001,8 +16252,8 @@ angular.module('mm.addons.mod_scorm')
             }
         }
     };
-        self.getScormReadableSyncTime = function(scormId, siteId) {
-        return $mmaModScormSync.getScormSyncTime(scormId, siteId).then(function(time) {
+        self.getScormReadableSyncTime = function(scormId) {
+        return $mmaModScormSync.getScormSyncTime(scormId).then(function(time) {
             if (time == 0) {
                 return $translate('mm.core.none');
             } else {
@@ -18010,11 +16261,10 @@ angular.module('mm.addons.mod_scorm')
             }
         });
     };
-        self.searchOnlineAttemptUserData = function(scormId, attempt, siteId) {
-        siteId = siteId || $mmSite.getId();
-        return $mmaModScorm.getScormUserData(scormId, attempt, false, siteId).catch(function() {
+        self.searchOnlineAttemptUserData = function(scormId, attempt) {
+        return $mmaModScorm.getScormUserData(scormId, attempt).catch(function() {
             if (attempt > 0) {
-                return self.searchOnlineAttemptUserData(scormId, attempt - 1, siteId);
+                return self.searchOnlineAttemptUserData(scormId, attempt - 1);
             } else {
                 return $q.reject();
             }
@@ -18070,8 +16320,19 @@ angular.module('mm.addons.mod_scorm')
 }]);
 
 angular.module('mm.addons.mod_scorm')
-.factory('$mmaModScorm', ["$mmSite", "$q", "$translate", "$mmLang", "$mmFilepool", "$mmFS", "$mmWS", "$sce", "$mmaModScormOnline", "$state", "$mmaModScormOffline", "$mmUtil", "$log", "$mmSitesManager", "mmaModScormComponent", "mmCoreNotDownloaded", function($mmSite, $q, $translate, $mmLang, $mmFilepool, $mmFS, $mmWS, $sce, $mmaModScormOnline, $state,
-            $mmaModScormOffline, $mmUtil, $log, $mmSitesManager, mmaModScormComponent, mmCoreNotDownloaded) {
+.constant('mmaModScormSynchronizationStore', 'mod_scorm_sync')
+.config(["$mmSitesFactoryProvider", "mmaModScormSynchronizationStore", function($mmSitesFactoryProvider, mmaModScormSynchronizationStore) {
+    var stores = [
+        {
+            name: mmaModScormSynchronizationStore,
+            keyPath: 'scormid',
+            indexes: []
+        }
+    ];
+    $mmSitesFactoryProvider.registerStores(stores);
+}])
+.factory('$mmaModScorm', ["$mmSite", "$q", "$translate", "$mmLang", "$mmFilepool", "$mmFS", "$mmWS", "$sce", "$mmaModScormOnline", "$state", "$mmaModScormOffline", "$mmUtil", "$log", "mmaModScormComponent", "mmCoreNotDownloaded", function($mmSite, $q, $translate, $mmLang, $mmFilepool, $mmFS, $mmWS, $sce, $mmaModScormOnline, $state,
+            $mmaModScormOffline, $mmUtil, $log, mmaModScormComponent, mmCoreNotDownloaded) {
     $log = $log.getInstance('$mmaModScorm');
     var self = {},
         statuses = ['notattempted', 'passed', 'completed', 'failed', 'incomplete', 'browsed', 'suspend'],
@@ -18183,44 +16444,44 @@ angular.module('mm.addons.mod_scorm')
     };
         self._downloadOrPrefetch = function(scorm, prefetch) {
         var result = self.isScormSupported(scorm),
-            siteId = $mmSite.getId();
+            siteid = $mmSite.getId();
         if (result !== true) {
             return $mmLang.translateAndReject(result);
         }
-        if (downloadPromises[siteId] && downloadPromises[siteId][scorm.id]) {
-            return downloadPromises[siteId][scorm.id];
-        } else if (!downloadPromises[siteId]) {
-            downloadPromises[siteId] = {};
+        if (downloadPromises[siteid] && downloadPromises[siteid][scorm.id]) {
+            return downloadPromises[siteid][scorm.id];
+        } else if (!downloadPromises[siteid]) {
+            downloadPromises[siteid] = {};
         }
         var files = self.getScormFileList(scorm),
             revision = scorm.sha1hash,
             dirPath,
             deferred = $q.defer(),
             fn = prefetch ? $mmFilepool.prefetchPackage : $mmFilepool.downloadPackage;
-        downloadPromises[siteId][scorm.id] = deferred.promise;
+        downloadPromises[siteid][scorm.id] = deferred.promise;
         self.getScormFolder(scorm.moduleurl).then(function(path) {
             dirPath = path;
             deferred.notify({message: 'mm.core.downloading'});
-            return fn(siteId, files, mmaModScormComponent, scorm.coursemodule, revision, 0)
+            return fn(siteid, files, mmaModScormComponent, scorm.coursemodule, revision, 0)
                                                         .then(undefined, undefined, deferred.notify);
         }).then(function() {
             return $mmFS.removeDir(dirPath).catch(function() {
             });
         }).then(function() {
-            return $mmFilepool.getFilePathByUrl(siteId, self.getPackageUrl(scorm));
+            return $mmFilepool.getFilePathByUrl(siteid, self.getPackageUrl(scorm));
         }).then(function(zippath) {
             deferred.notify({message: 'mm.core.unzipping'});
             return $mmFS.unzipFile(zippath, dirPath).then(function() {
-                return $mmFilepool.removeFileByUrl(siteId, self.getPackageUrl(scorm)).catch(function() {
+                return $mmFilepool.removeFileByUrl(siteid, self.getPackageUrl(scorm)).catch(function() {
                 });
             }, function(error) {
-                return $mmFilepool.storePackageStatus(siteId, mmaModScormComponent, scorm.coursemodule,
+                return $mmFilepool.storePackageStatus(siteid, mmaModScormComponent, scorm.coursemodule,
                                             mmCoreNotDownloaded, revision, 0).then(function() {
                     return $q.reject(error);
                 });
             }, deferred.notify);
         }).then(deferred.resolve, deferred.reject).finally(function() {
-            delete downloadPromises[siteId][scorm.id];
+            delete downloadPromises[siteid][scorm.id];
         });
         return deferred.promise;
     };
@@ -18328,57 +16589,53 @@ angular.module('mm.addons.mod_scorm')
         });
         return formatted;
     };
-        self.getAttemptCount = function(scormId, siteId, userId, ignoreMissing, ignoreCache) {
-        siteId = siteId || $mmSite.getId();
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            userId = userId || site.getUserId();
-            var result = {
-                    lastAttempt: {
-                        number: 0,
-                        offline: false
-                    }
-                },
-                promises = [];
-            promises.push($mmaModScormOnline.getAttemptCount(siteId, scormId, userId, ignoreMissing, ignoreCache)
-                        .then(function(count) {
-                result.online = [];
-                for (var i = 1; i <= count; i++) {
-                    result.online.push(i);
+        self.getAttemptCount = function(scormId, userId, ignoreMissing, ignoreCache) {
+        userId = userId || $mmSite.getUserId();
+        var result = {
+                lastAttempt: {
+                    number: 0,
+                    offline: false
                 }
-                if (count > result.lastAttempt.number) {
-                    result.lastAttempt.number = count;
-                    result.lastAttempt.offline = false;
+            },
+            promises = [];
+        promises.push($mmaModScormOnline.getAttemptCount(scormId, userId, ignoreMissing, ignoreCache).then(function(count) {
+            result.online = [];
+            for (var i = 1; i <= count; i++) {
+                result.online.push(i);
+            }
+            if (count > result.lastAttempt.number) {
+                result.lastAttempt.number = count;
+                result.lastAttempt.offline = false;
+            }
+        }));
+        promises.push($mmaModScormOffline.getAttempts(scormId, userId).then(function(attempts) {
+            result.offline = attempts.map(function(entry) {
+                if (entry.attempt >= result.lastAttempt.number) {
+                    result.lastAttempt.number = entry.attempt;
+                    result.lastAttempt.offline = true;
                 }
-            }));
-            promises.push($mmaModScormOffline.getAttempts(siteId, scormId, userId).then(function(attempts) {
-                result.offline = attempts.map(function(entry) {
-                    if (entry.attempt >= result.lastAttempt.number) {
-                        result.lastAttempt.number = entry.attempt;
-                        result.lastAttempt.offline = true;
-                    }
-                    return entry.attempt;
-                });
-            }));
-            return $q.all(promises).then(function() {
-                var total = result.online.length;
-                result.offline.forEach(function(attempt) {
-                    if (result.online.indexOf(attempt) == -1) {
-                        total++;
-                    }
-                });
-                result.total = total;
-                return result;
+                return entry.attempt;
             });
+        }));
+        return $q.all(promises).then(function() {
+            var total = result.online.length;
+            result.offline.forEach(function(attempt) {
+                if (result.online.indexOf(attempt) == -1) {
+                    total++;
+                }
+            });
+            result.total = total;
+            return result;
         });
     };
-        self.getAttemptGrade = function(scorm, attempt, offline, siteId) {
+        self.getAttemptGrade = function(scorm, attempt, offline) {
         var attemptscore = {
             scos: 0,
             values: 0,
             max: 0,
             sum: 0
         };
-        return self.getScormUserData(scorm.id, attempt, offline, siteId).then(function(data) {
+        return self.getScormUserData(scorm.id, attempt, offline).then(function(data) {
             angular.forEach(data, function(scodata) {
                 var userdata = scodata.userdata;
                 if (userdata.status == 'completed' || userdata.status == 'passed') {
@@ -18416,8 +16673,8 @@ angular.module('mm.addons.mod_scorm')
             return score;
         });
     };
-        self.getOrganizations = function(scormId, siteId) {
-        return self.getScos(scormId, siteId).then(function(scos) {
+        self.getOrganizations = function(scormid) {
+        return self.getScos(scormid).then(function(scos) {
             var organizations = [];
             angular.forEach(scos, function(sco) {
                 if (sco.organization == '' && sco.parent == '/' && sco.scormtype == '') {
@@ -18431,8 +16688,8 @@ angular.module('mm.addons.mod_scorm')
             return organizations;
         });
     };
-        self.getOrganizationToc = function(scormId, organization, attempt, offline, siteId) {
-        return self.getScosWithData(scormId, organization, attempt, offline, false, siteId).then(function(scos) {
+        self.getOrganizationToc = function(scormid, organization, attempt, offline) {
+        return self.getScosWithData(scormid, organization, attempt, offline).then(function(scos) {
             var map = {},
                 rootScos = [];
             angular.forEach(scos, function(sco, index) {
@@ -18458,55 +16715,54 @@ angular.module('mm.addons.mod_scorm')
         }
         return '';
     };
-        self.getScormUserData = function(scormId, attempt, offline, siteId, scos, ignoreCache) {
-        siteId = siteId || $mmSite.getId();
+        self.getScormUserData = function(scormId, attempt, offline, scos, ignoreCache) {
         if (offline) {
-            var promise = scos ? $q.when(scos) : self.getScos(scormId, siteId);
+            var promise = scos ? $q.when(scos) : self.getScos(scormId);
             return promise.then(function(scos) {
-                return $mmaModScormOffline.getScormUserData(siteId, scormId, attempt, undefined, scos);
+                return $mmaModScormOffline.getScormUserData(scormId, attempt, undefined, scos);
             });
         } else {
-            return $mmaModScormOnline.getScormUserData(siteId, scormId, attempt, ignoreCache);
+            return $mmaModScormOnline.getScormUserData(scormId, attempt, ignoreCache);
         }
     };
-        function getScosCacheKey(scormId) {
-        return 'mmaModScorm:scos:' + scormId;
+        function getScosCacheKey(scormid) {
+        return 'mmaModScorm:scos:' + scormid;
     }
-        self.getScos = function(scormId, siteId, organization, ignoreCache) {
-        siteId = siteId || $mmSite.getId();
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            organization = organization || '';
-            var params = {
-                    scormid: scormId
-                },
-                preSets = {
-                    cacheKey: getScosCacheKey(scormId)
-                };
-            if (ignoreCache) {
-                preSets.getFromCache = 0;
-                preSets.emergencyCache = 0;
-            }
-            return site.read('mod_scorm_get_scorm_scoes', params, preSets).then(function(response) {
-                if (response && response.scoes) {
-                    var scos = [];
-                    if (organization) {
-                        angular.forEach(response.scoes, function(sco) {
-                            if (sco.organization == organization) {
-                                scos.push(sco);
-                            }
-                        });
-                    } else {
-                        scos = response.scoes;
-                    }
-                    return scos;
+        self.getScos = function(scormid, organization, ignoreCache) {
+        organization = organization || '';
+        if (!$mmSite.isLoggedIn()) {
+            return $q.reject();
+        }
+        var params = {
+                scormid: scormid
+            },
+            preSets = {
+                cacheKey: getScosCacheKey(scormid)
+            };
+        if (ignoreCache) {
+            preSets.getFromCache = 0;
+            preSets.emergencyCache = 0;
+        }
+        return $mmSite.read('mod_scorm_get_scorm_scoes', params, preSets).then(function(response) {
+            if (response && response.scoes) {
+                var scos = [];
+                if (organization) {
+                    angular.forEach(response.scoes, function(sco) {
+                        if (sco.organization == organization) {
+                            scos.push(sco);
+                        }
+                    });
+                } else {
+                    scos = response.scoes;
                 }
-                return $q.reject();
-            });
+                return scos;
+            }
+            return $q.reject();
         });
     };
-        self.getScosWithData = function(scormId, organization, attempt, offline, ignoreCache, siteId) {
-        return self.getScos(scormId, siteId, organization, ignoreCache).then(function(scos) {
-            return self.getScormUserData(scormId, attempt, offline, siteId, scos, ignoreCache).then(function(data) {
+        self.getScosWithData = function(scormid, organization, attempt, offline, ignoreCache) {
+        return self.getScos(scormid, organization, ignoreCache).then(function(scos) {
+            return self.getScormUserData(scormid, attempt, offline, scos, ignoreCache).then(function(data) {
                 var trackDataBySCO = {};
                 angular.forEach(scos, function(sco) {
                     trackDataBySCO[sco.identifier] = data[sco.id].userdata;
@@ -18529,18 +16785,16 @@ angular.module('mm.addons.mod_scorm')
             });
         });
     };
-        self.getScoSrc = function(scorm, sco, siteId) {
+        self.getScoSrc = function(scorm, sco) {
         if (sco.launch.match(/http(s)?:\/\//)) {
             return $q.when($sce.trustAsResourceUrl(sco.launch));
         }
-        siteId = siteId || $mmSite.getId();
-        return $mmFilepool.getDirectoryUrlByUrl(siteId, scorm.moduleurl).then(function(dirPath) {
+        return $mmFilepool.getDirectoryUrlByUrl($mmSite.getId(), scorm.moduleurl).then(function(dirPath) {
             return $sce.trustAsResourceUrl($mmFS.concatenatePaths(dirPath, sco.launch));
         });
     };
-        self.getScormFolder = function(moduleUrl, siteId) {
-        siteId = siteId || $mmSite.getId();
-        return $mmFilepool.getFilePathByUrl(siteId, moduleUrl);
+        self.getScormFolder = function(moduleurl) {
+        return $mmFilepool.getFilePathByUrl($mmSite.getId(), moduleurl);
     };
         self.getScormFileList = function(scorm) {
         var files = [];
@@ -18584,48 +16838,47 @@ angular.module('mm.addons.mod_scorm')
             description: $translate.instant('mma.mod_scorm.' + descname)
         };
     };
-        function getScormDataCacheKey(courseId) {
-        return 'mmaModScorm:scorm:' + courseId;
+        function getScormDataCacheKey(courseid) {
+        return 'mmaModScorm:scorm:' + courseid;
     }
-        function getScorm(siteId, courseId, key, value, moduleUrl) {
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            var params = {
-                    courseids: [courseId]
-                },
-                preSets = {
-                    cacheKey: getScormDataCacheKey(courseId)
-                };
-            return site.read('mod_scorm_get_scorms_by_courses', params, preSets).then(function(response) {
-                if (response && response.scorms) {
-                    var currentScorm;
-                    angular.forEach(response.scorms, function(scorm) {
-                        if (!currentScorm && scorm[key] == value) {
-                            currentScorm = scorm;
-                        }
-                    });
-                    if (currentScorm) {
-                        if (typeof currentScorm.timeopen == 'undefined') {
-                            angular.forEach(response.warnings, function(warning) {
-                                if (warning.itemid === currentScorm.id) {
-                                    currentScorm.warningmessage = warning.message;
-                                }
-                            });
-                        }
-                        currentScorm.moduleurl = moduleUrl;
-                        return currentScorm;
+        function getScorm(courseid, key, value, moduleurl) {
+        var params = {
+                courseids: [courseid]
+            },
+            preSets = {
+                cacheKey: getScormDataCacheKey(courseid)
+            };
+        if (!$mmSite.isLoggedIn()) {
+            return $q.reject();
+        }
+        return $mmSite.read('mod_scorm_get_scorms_by_courses', params, preSets).then(function(response) {
+            if (response && response.scorms) {
+                var currentScorm;
+                angular.forEach(response.scorms, function(scorm) {
+                    if (!currentScorm && scorm[key] == value) {
+                        currentScorm = scorm;
                     }
+                });
+                if (currentScorm) {
+                    if (typeof currentScorm.timeopen == 'undefined') {
+                        angular.forEach(response.warnings, function(warning) {
+                            if (warning.itemid === currentScorm.id) {
+                                currentScorm.warningmessage = warning.message;
+                            }
+                        });
+                    }
+                    currentScorm.moduleurl = moduleurl;
+                    return currentScorm;
                 }
-                return $q.reject();
-            });
+            }
+            return $q.reject();
         });
     }
-        self.getScorm = function(courseId, cmid, moduleUrl, siteId) {
-        siteId = siteId || $mmSite.getId();
-        return getScorm(siteId, courseId, 'coursemodule', cmid, moduleUrl);
+        self.getScorm = function(courseid, cmid, moduleurl) {
+        return getScorm(courseid, 'coursemodule', cmid, moduleurl);
     };
-        self.getScormById = function(courseId, id, moduleUrl, siteId) {
-        siteId = siteId || $mmSite.getId();
-        return getScorm(siteId, courseId, 'id', id, moduleUrl);
+        self.getScormById = function(courseid, id, moduleurl) {
+        return getScorm(courseid, 'id', id, moduleurl);
     };
         self.getScormGradeMethod = function(scorm) {
         if (scorm.maxattempt == 1) {
@@ -18652,32 +16905,24 @@ angular.module('mm.addons.mod_scorm')
             }
         }
     };
-        self.invalidateAllScormData = function(scormId, siteId, userId) {
-        siteId = siteId || $mmSite.getId();
+        self.invalidateAllScormData = function(scormid, userid) {
         var promises = [];
-        promises.push($mmaModScormOnline.invalidateAttemptCount(siteId, scormId, userId));
-        promises.push(self.invalidateScos(scormId, siteId));
-        promises.push($mmaModScormOnline.invalidateScormUserData(siteId, scormId));
+        promises.push($mmaModScormOnline.invalidateAttemptCount(scormid, userid));
+        promises.push(self.invalidateScos(scormid));
+        promises.push($mmaModScormOnline.invalidateScormUserData(scormid));
         return $q.all(promises);
     };
-        self.invalidateContent = function(moduleId, siteId) {
-        siteId = siteId || $mmSite.getId();
-        return $mmFilepool.invalidateFilesByComponent(siteId, mmaModScormComponent, moduleId);
+        self.invalidateContent = function(moduleId) {
+        return $mmFilepool.invalidateFilesByComponent($mmSite.getId(), mmaModScormComponent, moduleId);
     };
-        self.invalidateScos = function(scormId, siteId) {
-        siteId = siteId || $mmSite.getId();
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            return site.invalidateWsCacheForKey(getScosCacheKey(scormId));
-        });
+        self.invalidateScos = function(scormid) {
+        return $mmSite.invalidateWsCacheForKey(getScosCacheKey(scormid));
     };
-        self.invalidateScormData = function(courseId, siteId) {
-        siteId = siteId || $mmSite.getId();
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            return site.invalidateWsCacheForKey(getScormDataCacheKey(courseId));
-        });
+        self.invalidateScormData = function(courseid) {
+        return $mmSite.invalidateWsCacheForKey(getScormDataCacheKey(courseid));
     };
-        self.isAttemptIncomplete = function(scormId, attempt, offline, ignoreCache, siteId) {
-        return self.getScosWithData(scormId, undefined, attempt, offline, ignoreCache, siteId).then(function(scos) {
+        self.isAttemptIncomplete = function(scormId, attempt, offline, ignoreCache) {
+        return self.getScosWithData(scormId, undefined, attempt, offline, ignoreCache).then(function(scos) {
             var incomplete = false;
             angular.forEach(scos, function(sco) {
                 if (sco.isvisible && sco.launch) {
@@ -18689,21 +16934,16 @@ angular.module('mm.addons.mod_scorm')
             return incomplete;
         });
     };
-        self.isPluginEnabled = function(siteId) {
-        siteId = siteId || $mmSite.getId();
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            return  site.wsAvailable('mod_scorm_get_scorm_attempt_count') &&
-                    site.wsAvailable('mod_scorm_get_scorm_sco_tracks') &&
-                    site.wsAvailable('mod_scorm_get_scorm_scoes') &&
-                    site.wsAvailable('mod_scorm_get_scorm_user_data') &&
-                    site.wsAvailable('mod_scorm_get_scorms_by_courses') &&
-                    site.wsAvailable('mod_scorm_insert_scorm_tracks');
-        });
+        self.isPluginEnabled = function() {
+        return  $mmSite.wsAvailable('mod_scorm_get_scorm_attempt_count') &&
+                $mmSite.wsAvailable('mod_scorm_get_scorm_sco_tracks') &&
+                $mmSite.wsAvailable('mod_scorm_get_scorm_scoes') &&
+                $mmSite.wsAvailable('mod_scorm_get_scorm_user_data') &&
+                $mmSite.wsAvailable('mod_scorm_get_scorms_by_courses') &&
+                $mmSite.wsAvailable('mod_scorm_insert_scorm_tracks');
     };
-        self.isScormBeingPlayed = function(scormId, siteId) {
-        siteId = siteId || $mmSite.getId();
-        return $mmSite.getId() == siteId && $state.current.name == 'site.mod_scorm-player' &&
-                        $state.params.scorm && $state.params.scorm.id == scormId;
+        self.isScormBeingPlayed = function(scormId) {
+        return $state.current.name == 'site.mod_scorm-player' && $state.params.scorm && $state.params.scorm.id == scormId;
     };
         self.isScormClosed = function(scorm) {
         var timeNow = $mmUtil.timestamp();
@@ -18738,39 +16978,33 @@ angular.module('mm.addons.mod_scorm')
         self.isStatusIncomplete = function(status) {
         return !status || status == 'notattempted' || status == 'incomplete' || status == 'browsed';
     };
-        self.isValidPackageUrl = function(packageUrl) {
-        if (!packageUrl) {
+        self.isValidPackageUrl = function(packageurl) {
+        if (!packageurl) {
             return false;
         }
-        if (packageUrl.indexOf('imsmanifest.xml') > -1) {
+        if (packageurl.indexOf('imsmanifest.xml') > -1) {
             return false;
         }
         return true;
     };
-        self.logView = function(id, siteId) {
-        siteId = siteId || $mmSite.getId();
+        self.logView = function(id) {
         if (id) {
-            return $mmSitesManager.getSite(siteId).then(function(site) {
-                var params = {
-                    scormid: id
-                };
-                return site.write('mod_scorm_view_scorm', params);
-            });
+            var params = {
+                scormid: id
+            };
+            return $mmSite.write('mod_scorm_view_scorm', params);
         }
         return $q.reject();
     };
-        self.logLaunchSco = function(scormId, scoId, siteId) {
-        siteId = siteId || $mmSite.getId();
+        self.logLaunchSco = function(scormId, scoId) {
         var params = {
             scormid: scormId,
             scoid: scoId
         };
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            return site.write('mod_scorm_launch_sco', params).then(function(response) {
-                if (!response || !response.status) {
-                    return $q.reject();
-                }
-            });
+        return $mmSite.write('mod_scorm_launch_sco', params).then(function(response) {
+            if (!response || !response.status) {
+                return $q.reject();
+            }
         });
     };
         self.prefetch = function(scorm) {
@@ -18780,10 +17014,9 @@ angular.module('mm.addons.mod_scorm')
         }));
         return $q.all(promises);
     };
-        self.prefetchData = function(scorm, siteId) {
-        siteId = siteId || $mmSite.getId();
+        self.prefetchData = function(scorm) {
         var promises = [];
-        promises.push($mmaModScormOnline.getAttemptCount(siteId, scorm.id).catch(function() {
+        promises.push($mmaModScormOnline.getAttemptCount(scorm.id).catch(function() {
             return 0;
         }).then(function(numAttempts) {
             if (numAttempts > 0) {
@@ -18793,7 +17026,7 @@ angular.module('mm.addons.mod_scorm')
                     attempts.push(i);
                 }
                 attempts.forEach(function(attempt) {
-                    datapromises.push($mmaModScormOnline.getScormUserData(siteId, scorm.id, attempt).catch(function(err) {
+                    datapromises.push($mmaModScormOnline.getScormUserData(scorm.id, attempt).catch(function(err) {
                         if (attempt == numAttempts) {
                             return $q.reject(err);
                         }
@@ -18801,24 +17034,23 @@ angular.module('mm.addons.mod_scorm')
                 });
                 return $q.all(datapromises);
             } else {
-                return $mmaModScormOnline.getScormUserData(siteId, scorm.id, 0);
+                return $mmaModScormOnline.getScormUserData(scorm.id, 0);
             }
         }));
-        promises.push(self.getScos(scorm.id, siteId));
+        promises.push(self.getScos(scorm.id));
         return $q.all(promises);
     };
         self.prefetchPackage = function(scorm) {
         return self._downloadOrPrefetch(scorm, true);
     };
-        self.saveTracks = function(scoId, attempt, tracks, offline, scorm, userData, siteId) {
-        siteId = siteId || $mmSite.getId();
+        self.saveTracks = function(scoId, attempt, tracks, offline, scorm, userData) {
         if (offline) {
-            var promise = userData ? $q.when(userData) : self.getScormUserData(scorm.id, attempt, offline, siteId);
+            var promise = userData ? $q.when(userData) : self.getScormUserData(scorm.id, attempt, offline);
             return promise.then(function(userData) {
-                return $mmaModScormOffline.saveTracks(siteId, scorm, scoId, attempt, tracks, userData);
+                return $mmaModScormOffline.saveTracks(scorm, scoId, attempt, tracks, userData);
             });
         } else {
-            return $mmaModScormOnline.saveTracks(siteId, scorm.id, scoId, attempt, tracks);
+            return $mmaModScormOnline.saveTracks(scorm.id, scoId, attempt, tracks);
         }
     };
         self.saveTracksSync = function(scoId, attempt, tracks, offline, scorm, userData) {
@@ -18902,109 +17134,93 @@ angular.module('mm.addons.mod_scorm')
     ];
     $mmSitesFactoryProvider.registerStores(stores);
 }])
-.factory('$mmaModScormOffline', ["$mmSite", "$mmUtil", "$q", "$log", "$mmSitesManager", "mmaModScormOfflineAttemptsStore", "mmaModScormOfflineTracksStore", function($mmSite, $mmUtil, $q, $log, $mmSitesManager, mmaModScormOfflineAttemptsStore,
+.factory('$mmaModScormOffline', ["$mmSite", "$mmUtil", "$q", "$log", "mmaModScormOfflineAttemptsStore", "mmaModScormOfflineTracksStore", function($mmSite, $mmUtil, $q, $log, mmaModScormOfflineAttemptsStore,
             mmaModScormOfflineTracksStore) {
     $log = $log.getInstance('$mmaModScormOffline');
     var self = {},
         blockedScorms = {};
-        self.changeAttemptNumber = function(siteId, scormId, attempt, newAttempt, userId) {
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            $log.debug('Change attempt number from ' + attempt + ' to ' + newAttempt + ' in SCORM ' + scormId);
-            userId = userId || site.getUserId();
-            var db = site.getDb(),
-                newEntry = {
-                    scormid: scormId,
-                    userid: userId,
-                    attempt: newAttempt,
-                    timemodified: $mmUtil.timestamp()
-                };
-            if (!blockedScorms[siteId]) {
-                blockedScorms[siteId] = {};
-            }
-            blockedScorms[siteId][scormId] = true;
-            return db.get(mmaModScormOfflineAttemptsStore, [scormId, userId, attempt]).then(function(entry) {
-                newEntry.timecreated = entry.timecreated;
-                newEntry.courseid = entry.courseid;
-                return db.insert(mmaModScormOfflineAttemptsStore, newEntry).then(function() {
-                    return self.getScormStoredData(siteId, scormId, attempt, userId).then(function(entries) {
-                        var promises = [];
-                        angular.forEach(entries, function(entry) {
-                            entry.attempt = newAttempt;
-                            entry.synced = 0;
-                            promises.push(db.insert(mmaModScormOfflineTracksStore, entry));
-                        });
-                        return $mmUtil.allPromises(promises).then(function() {
-                            return self.deleteAttempt(siteId, scormId, attempt).catch(function() {
-                                return self.deleteAttempt(siteId, scormId, attempt).catch(function() {});
-                            });
-                        });
-                    }).catch(function() {
-                        return self.deleteAttempt(siteId, scormId, newAttempt).then(function() {
-                            return $q.reject();
+        self.changeAttemptNumber = function(scormId, attempt, newAttempt, userId) {
+        $log.debug('Change attempt number from ' + attempt + ' to ' + newAttempt + ' in SCORM ' + scormId);
+        userId = userId || $mmSite.getUserId();
+        var db = $mmSite.getDb(),
+            newEntry = {
+                scormid: scormId,
+                userid: userId,
+                attempt: newAttempt,
+                timemodified: $mmUtil.timestamp()
+            };
+        blockedScorms[scormId] = true;
+        return db.get(mmaModScormOfflineAttemptsStore, [scormId, userId, attempt]).then(function(entry) {
+            newEntry.timecreated = entry.timecreated;
+            newEntry.courseid = entry.courseid;
+            return db.insert(mmaModScormOfflineAttemptsStore, newEntry).then(function() {
+                return self.getScormStoredData(scormId, attempt, userId).then(function(entries) {
+                    var promises = [];
+                    angular.forEach(entries, function(entry) {
+                        entry.attempt = newAttempt;
+                        entry.synced = 0;
+                        promises.push(db.insert(mmaModScormOfflineTracksStore, entry));
+                    });
+                    return $mmUtil.allPromises(promises).then(function() {
+                        return self.deleteAttempt(scormId, attempt).catch(function() {
+                            return self.deleteAttempt(scormId, attempt).catch(function() {});
                         });
                     });
+                }).catch(function() {
+                    return self.deleteAttempt(scormId, newAttempt).then(function() {
+                        return $q.reject();
+                    });
                 });
-            }).finally(function() {
-                blockedScorms[siteId][scormId] = false;
             });
+        }).finally(function() {
+            blockedScorms[scormId] = false;
         });
     };
-        self.clearBlockedScorms = function(siteId) {
-        if (siteId) {
-            delete blockedScorms[siteId];
-        } else {
-            blockedScorms = {};
+        self.clearBlockedScorms = function() {
+        blockedScorms = {};
+    };
+        self.createNewAttempt = function(scorm, userId, attempt, userData, snapshot) {
+        $log.debug('Creating new offline attempt ' + attempt + ' in SCORM ' + scorm.id);
+        userId = userId || $mmSite.getUserId();
+        blockedScorms[scorm.id] = true;
+        var db = $mmSite.getDb(),
+            entry = {
+                scormid: scorm.id,
+                userid: userId,
+                attempt: attempt,
+                courseid: scorm.course,
+                timecreated: $mmUtil.timestamp(),
+                timemodified: $mmUtil.timestamp()
+            };
+        if (snapshot) {
+            entry.snapshot = removeDefaultData(snapshot);
         }
-    };
-        self.createNewAttempt = function(siteId, scorm, userId, attempt, userData, snapshot) {
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            $log.debug('Creating new offline attempt ' + attempt + ' in SCORM ' + scorm.id);
-            userId = userId || site.getUserId();
-            if (!blockedScorms[siteId]) {
-                blockedScorms[siteId] = {};
-            }
-            blockedScorms[siteId][scorm.id] = true;
-            var db = site.getDb(),
-                entry = {
-                    scormid: scorm.id,
-                    userid: userId,
-                    attempt: attempt,
-                    courseid: scorm.course,
-                    timecreated: $mmUtil.timestamp(),
-                    timemodified: $mmUtil.timestamp()
-                };
-            if (snapshot) {
-                entry.snapshot = removeDefaultData(snapshot);
-            }
-            return db.insert(mmaModScormOfflineAttemptsStore, entry).then(function() {
-                var promises = [];
-                angular.forEach(userData, function(sco) {
-                    var tracks = [];
-                    angular.forEach(sco.userdata, function(value, element) {
-                        tracks.push({element: element, value: value});
-                    });
-                    promises.push(self.saveTracks(siteId, scorm, sco.scoid, attempt, tracks, userData));
+        return db.insert(mmaModScormOfflineAttemptsStore, entry).then(function() {
+            var promises = [];
+            angular.forEach(userData, function(sco) {
+                var tracks = [];
+                angular.forEach(sco.userdata, function(value, element) {
+                    tracks.push({element: element, value: value});
                 });
-                return $q.all(promises);
-            }).finally(function() {
-                blockedScorms[siteId][scorm.id] = false;
+                promises.push(self.saveTracks(scorm, sco.scoid, attempt, tracks, userData));
             });
+            return $q.all(promises);
+        }).finally(function() {
+            blockedScorms[scorm.id] = false;
         });
     };
-        self.deleteAttempt = function(siteId, scormId, attempt, userId) {
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            $log.debug('Delete offline attempt ' + attempt + ' in SCORM ' + scormId);
-            userId = userId || site.getUserId();
-            return self.getScormStoredData(siteId, scormId, attempt, userId).then(function(entries) {
-                var promises = [],
-                    db = site.getDb();
-                angular.forEach(entries, function(entry) {
-                    var entryId = [entry.userid, entry.scormid, entry.scoid, entry.attempt, entry.element];
-                    promises.push(db.remove(mmaModScormOfflineTracksStore, entryId));
-                });
-                promises.push(db.remove(mmaModScormOfflineAttemptsStore, [scormId, userId, attempt]));
-                return $q.all(promises);
+        self.deleteAttempt = function(scormId, attempt, userId) {
+        $log.debug('Delete offline attempt ' + attempt + ' in SCORM ' + scormId);
+        userId = userId || $mmSite.getUserId();
+        return self.getScormStoredData(scormId, attempt, userId).then(function(entries) {
+            var promises = [],
+                db = $mmSite.getDb();
+            angular.forEach(entries, function(entry) {
+                var entryId = [entry.userid, entry.scormid, entry.scoid, entry.attempt, entry.element];
+                promises.push(db.remove(mmaModScormOfflineTracksStore, entryId));
             });
+            promises.push(db.remove(mmaModScormOfflineAttemptsStore, [scormId, userId, attempt]));
+            return $q.all(promises);
         });
     };
         function formatInteractions(scoUserData) {
@@ -19049,139 +17265,127 @@ angular.module('mm.addons.mod_scorm')
         });
         return response;
     }
-        self.getAllAttempts = function(siteId) {
-        siteId = siteId || $mmSite.getId();
-        return $mmSitesManager.getSiteDb(siteId).then(function(db) {
-            if (!db) {
-                return $q.reject();
-            }
-            return db.getAll(mmaModScormOfflineAttemptsStore);
+        self.getAllAttempts = function() {
+        var db = $mmSite.getDb();
+        if (!db) {
+            return $q.when([]);
+        }
+        return db.getAll(mmaModScormOfflineAttemptsStore);
+    };
+        self.getAttempts = function(scormId, userId) {
+        userId = userId || $mmSite.getUserId();
+        var db = $mmSite.getDb();
+        return db.whereEqual(mmaModScormOfflineAttemptsStore, 'scormAndUser', [scormId, userId]).then(function(attempts) {
+            return attempts;
         });
     };
-        self.getAttempts = function(siteId, scormId, userId) {
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            userId = userId || site.getUserId();
-            var db = site.getDb();
-            return db.whereEqual(mmaModScormOfflineAttemptsStore, 'scormAndUser', [scormId, userId]).then(function(attempts) {
-                return attempts;
-            });
+        self.getAttemptSnapshot = function(scormId, attempt, userId) {
+        userId = userId || $mmSite.getUserId();
+        return $mmSite.getDb().get(mmaModScormOfflineAttemptsStore, [scormId, userId, attempt]).catch(function() {
+            return {};
+        }).then(function(entry) {
+            return entry.snapshot;
         });
     };
-        self.getAttemptSnapshot = function(siteId, scormId, attempt, userId) {
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            userId = userId || site.getUserId();
-            return site.getDb().get(mmaModScormOfflineAttemptsStore, [scormId, userId, attempt]).catch(function() {
-                return {};
-            }).then(function(entry) {
-                return entry.snapshot;
-            });
+        self.getAttemptCreationTime = function(scormId, attempt, userId) {
+        userId = userId || $mmSite.getUserId();
+        return $mmSite.getDb().get(mmaModScormOfflineAttemptsStore, [scormId, userId, attempt]).catch(function() {
+            return {};
+        }).then(function(entry) {
+            return entry.timecreated;
         });
     };
-        self.getAttemptCreationTime = function(siteId, scormId, attempt, userId) {
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            userId = userId || site.getUserId();
-            return site.getDb().get(mmaModScormOfflineAttemptsStore, [scormId, userId, attempt]).catch(function() {
-                return {};
-            }).then(function(entry) {
-                return entry.timecreated;
-            });
-        });
+        self.getScormStoredData = function(scormId, attempt, userId, excludeSynced, excludeNotSynced) {
+        userId = userId || $mmSite.getUserId();
+        var where;
+        if (excludeSynced && excludeNotSynced) {
+            return $q.when([]);
+        } else if (excludeSynced || excludeNotSynced) {
+            where = ['scormUserAttemptSynced', '=', [scormId, userId, attempt, excludeNotSynced ? 1 : 0]];
+        } else {
+            where = ['scormUserAttempt', '=', [scormId, userId, attempt]];
+        }
+        return $mmSite.getDb().query(mmaModScormOfflineTracksStore, where);
     };
-        self.getScormStoredData = function(siteId, scormId, attempt, userId, excludeSynced, excludeNotSynced) {
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            userId = userId || site.getUserId();
-            var where;
-            if (excludeSynced && excludeNotSynced) {
-                return $q.when([]);
-            } else if (excludeSynced || excludeNotSynced) {
-                where = ['scormUserAttemptSynced', '=', [scormId, userId, attempt, excludeNotSynced ? 1 : 0]];
-            } else {
-                where = ['scormUserAttempt', '=', [scormId, userId, attempt]];
-            }
-            return site.getDb().query(mmaModScormOfflineTracksStore, where);
-        });
-    };
-        self.getScormUserData = function(siteId, scormId, attempt, userId, scos) {
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            userId = userId || site.getUserId();
-            return self.getScormStoredData(siteId, scormId, attempt, userId).then(function(entries) {
-                var response = {},
-                    launchUrls = getLaunchUrlsFromScos(scos),
-                    userId = site.getUserId(),
-                    username = site.getInfo().username,
-                    fullName = site.getInfo().fullname;
-                angular.forEach(entries, function(entry) {
-                    var scoid = entry.scoid;
-                    if (!response[scoid]) {
-                        response[scoid] = {
+        self.getScormUserData = function(scormId, attempt, userId, scos) {
+        userId = userId || $mmSite.getUserId();
+        return self.getScormStoredData(scormId, attempt, userId).then(function(entries) {
+            var response = {},
+                launchUrls = getLaunchUrlsFromScos(scos),
+                userId = $mmSite.getUserId(),
+                username = $mmSite.getInfo().username,
+                fullName = $mmSite.getInfo().fullname;
+            angular.forEach(entries, function(entry) {
+                var scoid = entry.scoid;
+                if (!response[scoid]) {
+                    response[scoid] = {
+                        scoid: scoid,
+                        userdata: {
+                            userid: userId,
                             scoid: scoid,
-                            userdata: {
-                                userid: userId,
-                                scoid: scoid,
-                                timemodified: 0
-                            }
-                        };
-                    }
-                    response[scoid].userdata[entry.element] = entry.value;
-                    if (entry.timemodified > response[scoid].userdata.timemodified) {
-                        response[scoid].userdata.timemodified = entry.timemodified;
-                    }
-                });
-                angular.forEach(response, function(sco) {
-                    sco.userdata = formatInteractions(sco.userdata);
-                });
-                angular.forEach(scos, function(sco) {
-                    if (!response[sco.id]) {
-                        response[sco.id] = {
-                            scoid: sco.id,
-                            userdata: {
-                                status: '',
-                                score_raw: ''
-                            }
-                        };
-                    }
-                });
-                angular.forEach(response, function(sco) {
-                    sco.defaultdata = {};
-                    sco.defaultdata['cmi.core.student_id'] = username;
-                    sco.defaultdata['cmi.core.student_name'] = fullName;
-                    sco.defaultdata['cmi.core.lesson_mode'] = 'normal';
-                    sco.defaultdata['cmi.core.credit'] = 'credit';
-                    if (sco.userdata.status === '') {
-                        sco.defaultdata['cmi.core.entry'] = 'ab-initio';
-                    } else if (sco.userdata['cmi.core.exit'] === 'suspend') {
-                        sco.defaultdata['cmi.core.entry'] = 'resume';
-                    } else {
-                        sco.defaultdata['cmi.core.entry'] = '';
-                    }
-                    sco.defaultdata['cmi.student_data.mastery_score'] = scormIsset(sco.userdata, 'masteryscore');
-                    sco.defaultdata['cmi.student_data.max_time_allowed'] = scormIsset(sco.userdata, 'max_time_allowed');
-                    sco.defaultdata['cmi.student_data.time_limit_action'] = scormIsset(sco.userdata, 'time_limit_action');
-                    sco.defaultdata['cmi.core.total_time'] = scormIsset(sco.userdata, 'cmi.core.total_time', '00:00:00');
-                    sco.defaultdata['cmi.launch_data'] = launchUrls[sco.scoid];
-                    sco.defaultdata['cmi.core.lesson_location'] = scormIsset(sco.userdata, 'cmi.core.lesson_location');
-                    sco.defaultdata['cmi.core.lesson_status'] = scormIsset(sco.userdata, 'cmi.core.lesson_status');
-                    sco.defaultdata['cmi.core.score.raw'] = scormIsset(sco.userdata, 'cmi.core.score.raw');
-                    sco.defaultdata['cmi.core.score.max'] = scormIsset(sco.userdata, 'cmi.core.score.max');
-                    sco.defaultdata['cmi.core.score.min'] = scormIsset(sco.userdata, 'cmi.core.score.min');
-                    sco.defaultdata['cmi.core.exit'] = scormIsset(sco.userdata, 'cmi.core.exit');
-                    sco.defaultdata['cmi.suspend_data'] = scormIsset(sco.userdata, 'cmi.suspend_data');
-                    sco.defaultdata['cmi.comments'] = scormIsset(sco.userdata, 'cmi.comments');
-                    sco.defaultdata['cmi.student_preference.language'] = scormIsset(sco.userdata, 'cmi.student_preference.language');
-                    sco.defaultdata['cmi.student_preference.audio'] = scormIsset(sco.userdata, 'cmi.student_preference.audio', '0');
-                    sco.defaultdata['cmi.student_preference.speed'] = scormIsset(sco.userdata, 'cmi.student_preference.speed', '0');
-                    sco.defaultdata['cmi.student_preference.text'] = scormIsset(sco.userdata, 'cmi.student_preference.text', '0');
-                    sco.userdata.student_id = username;
-                    sco.userdata.student_name = fullName;
-                    sco.userdata.mode = sco.defaultdata['cmi.core.lesson_mode'];
-                    sco.userdata.credit = sco.defaultdata['cmi.core.credit'];
-                    sco.userdata.entry = sco.defaultdata['cmi.core.entry'];
-                });
-                return response;
+                            timemodified: 0
+                        }
+                    };
+                }
+                response[scoid].userdata[entry.element] = entry.value;
+                if (entry.timemodified > response[scoid].userdata.timemodified) {
+                    response[scoid].userdata.timemodified = entry.timemodified;
+                }
             });
+            angular.forEach(response, function(sco) {
+                sco.userdata = formatInteractions(sco.userdata);
+            });
+            angular.forEach(scos, function(sco) {
+                if (!response[sco.id]) {
+                    response[sco.id] = {
+                        scoid: sco.id,
+                        userdata: {
+                            status: '',
+                            score_raw: ''
+                        }
+                    };
+                }
+            });
+            angular.forEach(response, function(sco) {
+                sco.defaultdata = {};
+                sco.defaultdata['cmi.core.student_id'] = username;
+                sco.defaultdata['cmi.core.student_name'] = fullName;
+                sco.defaultdata['cmi.core.lesson_mode'] = 'normal';
+                sco.defaultdata['cmi.core.credit'] = 'credit';
+                if (sco.userdata.status === '') {
+                    sco.defaultdata['cmi.core.entry'] = 'ab-initio';
+                } else if (sco.userdata['cmi.core.exit'] === 'suspend') {
+                    sco.defaultdata['cmi.core.entry'] = 'resume';
+                } else {
+                    sco.defaultdata['cmi.core.entry'] = '';
+                }
+                sco.defaultdata['cmi.student_data.mastery_score'] = scormIsset(sco.userdata, 'masteryscore');
+                sco.defaultdata['cmi.student_data.max_time_allowed'] = scormIsset(sco.userdata, 'max_time_allowed');
+                sco.defaultdata['cmi.student_data.time_limit_action'] = scormIsset(sco.userdata, 'time_limit_action');
+                sco.defaultdata['cmi.core.total_time'] = scormIsset(sco.userdata, 'cmi.core.total_time', '00:00:00');
+                sco.defaultdata['cmi.launch_data'] = launchUrls[sco.scoid];
+                sco.defaultdata['cmi.core.lesson_location'] = scormIsset(sco.userdata, 'cmi.core.lesson_location');
+                sco.defaultdata['cmi.core.lesson_status'] = scormIsset(sco.userdata, 'cmi.core.lesson_status');
+                sco.defaultdata['cmi.core.score.raw'] = scormIsset(sco.userdata, 'cmi.core.score.raw');
+                sco.defaultdata['cmi.core.score.max'] = scormIsset(sco.userdata, 'cmi.core.score.max');
+                sco.defaultdata['cmi.core.score.min'] = scormIsset(sco.userdata, 'cmi.core.score.min');
+                sco.defaultdata['cmi.core.exit'] = scormIsset(sco.userdata, 'cmi.core.exit');
+                sco.defaultdata['cmi.suspend_data'] = scormIsset(sco.userdata, 'cmi.suspend_data');
+                sco.defaultdata['cmi.comments'] = scormIsset(sco.userdata, 'cmi.comments');
+                sco.defaultdata['cmi.student_preference.language'] = scormIsset(sco.userdata, 'cmi.student_preference.language');
+                sco.defaultdata['cmi.student_preference.audio'] = scormIsset(sco.userdata, 'cmi.student_preference.audio', '0');
+                sco.defaultdata['cmi.student_preference.speed'] = scormIsset(sco.userdata, 'cmi.student_preference.speed', '0');
+                sco.defaultdata['cmi.student_preference.text'] = scormIsset(sco.userdata, 'cmi.student_preference.text', '0');
+                sco.userdata.student_id = username;
+                sco.userdata.student_name = fullName;
+                sco.userdata.mode = sco.defaultdata['cmi.core.lesson_mode'];
+                sco.userdata.credit = sco.defaultdata['cmi.core.credit'];
+                sco.userdata.entry = sco.defaultdata['cmi.core.entry'];
+            });
+            return response;
         });
     };
-        function insertTrackToDB(db, userId, scormId, scoId, attempt, element, value, synchronous) {
+        function insertTrackToDB(userId, scormId, scoId, attempt, element, value, synchronous) {
         var entry = {
             userid: userId,
             scormid: scormId,
@@ -19193,56 +17397,17 @@ angular.module('mm.addons.mod_scorm')
             synced: 0
         };
         if (synchronous) {
-            return db.insertSync(mmaModScormOfflineTracksStore, entry);
+            return $mmSite.getDb().insertSync(mmaModScormOfflineTracksStore, entry);
         } else {
-            return db.insert(mmaModScormOfflineTracksStore, entry);
+            return $mmSite.getDb().insert(mmaModScormOfflineTracksStore, entry);
         }
     }
-        function insertTrack(siteId, userId, scormId, scoId, attempt, element, value, forceCompleted, scoData) {
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            userId = userId || site.getUserId();
-            scoData = scoData || {};
-            var promises = [],
-                lessonStatusInserted = false,
-                scoUserData = scoData.userdata || {},
-                db = site.getDb();
-            if (forceCompleted) {
-                if (element == 'cmi.core.lesson_status' && value == 'incomplete') {
-                    if (scoUserData['cmi.core.score.raw']) {
-                        value = 'completed';
-                    }
-                }
-                if (element == 'cmi.core.score.raw') {
-                    if (scoUserData['cmi.core.lesson_status'] == 'incomplete') {
-                        lessonStatusInserted = true;
-                        promises.push(insertTrackToDB(db, userId, scormId, scoId, attempt, 'cmi.core.lesson_status', 'completed'));
-                    }
-                }
-            }
-            return $q.all(promises).then(function() {
-                if (!scoUserData[element] || element != 'x.start.time') {
-                    return insertTrackToDB(db, userId, scormId, scoId, attempt, element, value).catch(function() {
-                        if (lessonStatusInserted) {
-                            return insertTrackToDB(db, userId, scormId, scoId, attempt, 'cmi.core.lesson_status', 'incomplete')
-                                    .then(function() {
-                                return $q.reject();
-                            });
-                        }
-                        return $q.reject();
-                    });
-                }
-            });
-        });
-    }
-        function insertTrackSync(userId, scormId, scoId, attempt, element, value, forceCompleted, scoData) {
+        function insertTrack(userId, scormId, scoId, attempt, element, value, forceCompleted, scoData) {
         userId = userId || $mmSite.getUserId();
         scoData = scoData || {};
-        if (!$mmSite.isLoggedIn()) {
-            return false;
-        }
-        var lessonStatusInserted = false,
-            scoUserData = scoData.userdata || {},
-            db = $mmSite.getDb();
+        var promises = [],
+            lessonStatusInserted = false,
+            scoUserData = scoData.userdata || {};
         if (forceCompleted) {
             if (element == 'cmi.core.lesson_status' && value == 'incomplete') {
                 if (scoUserData['cmi.core.score.raw']) {
@@ -19252,43 +17417,70 @@ angular.module('mm.addons.mod_scorm')
             if (element == 'cmi.core.score.raw') {
                 if (scoUserData['cmi.core.lesson_status'] == 'incomplete') {
                     lessonStatusInserted = true;
-                    if (!insertTrackToDB(db, userId, scormId, scoId, attempt, 'cmi.core.lesson_status', 'completed', true)) {
+                    promises.push(insertTrackToDB(userId, scormId, scoId, attempt, 'cmi.core.lesson_status', 'completed'));
+                }
+            }
+        }
+        return $q.all(promises).then(function() {
+            if (!scoUserData[element] || element != 'x.start.time') {
+                return insertTrackToDB(userId, scormId, scoId, attempt, element, value).catch(function() {
+                    if (lessonStatusInserted) {
+                        return insertTrackToDB(userId, scormId, scoId, attempt, 'cmi.core.lesson_status', 'incomplete')
+                                .then(function() {
+                            return $q.reject();
+                        });
+                    }
+                    return $q.reject();
+                });
+            }
+        });
+    }
+        function insertTrackSync(userId, scormId, scoId, attempt, element, value, forceCompleted, scoData) {
+        userId = userId || $mmSite.getUserId();
+        scoData = scoData || {};
+        var lessonStatusInserted = false,
+            scoUserData = scoData.userdata || {};
+        if (forceCompleted) {
+            if (element == 'cmi.core.lesson_status' && value == 'incomplete') {
+                if (scoUserData['cmi.core.score.raw']) {
+                    value = 'completed';
+                }
+            }
+            if (element == 'cmi.core.score.raw') {
+                if (scoUserData['cmi.core.lesson_status'] == 'incomplete') {
+                    lessonStatusInserted = true;
+                    if (!insertTrackToDB(userId, scormId, scoId, attempt, 'cmi.core.lesson_status', 'completed', true)) {
                         return false;
                     }
                 }
             }
         }
         if (!scoUserData[element] || element != 'x.start.time') {
-            if (!insertTrackToDB(db, userId, scormId, scoId, attempt, element, value, true)) {
+            if (!insertTrackToDB(userId, scormId, scoId, attempt, element, value, true)) {
                 if (lessonStatusInserted) {
-                    insertTrackToDB(db, userId, scormId, scoId, attempt, 'cmi.core.lesson_status', 'incomplete', true);
+                    insertTrackToDB(userId, scormId, scoId, attempt, 'cmi.core.lesson_status', 'incomplete', true);
                 }
                 return false;
             }
             return true;
         }
     }
-        self.isScormBlocked = function(siteId, scormId) {
-        if (!blockedScorms[siteId]) {
-            return false;
-        }
-        return !!blockedScorms[siteId][scormId];
+        self.isScormBlocked = function(scormId) {
+        return !!blockedScorms[scormId];
     };
-        self.markAsSynced = function(siteId, scormId, attempt, userId, scoId) {
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            $log.debug('Mark SCO ' + scoId + ' as synced for attempt ' + attempt + ' in SCORM ' + scormId);
-            userId = userId || site.getUserId();
-            return self.getScormStoredData(siteId, scormId, attempt, userId, true).then(function(entries) {
-                var promises = [],
-                    db = site.getDb();
-                angular.forEach(entries, function(entry) {
-                    if (entry.scoid == scoId) {
-                        entry.synced = 1;
-                        promises.push(db.insert(mmaModScormOfflineTracksStore, entry));
-                    }
-                });
-                return $q.all(promises);
+        self.markAsSynced = function(scormId, attempt, userId, scoId) {
+        $log.debug('Mark SCO ' + scoId + ' as synced for attempt ' + attempt + ' in SCORM ' + scormId);
+        userId = userId || $mmSite.getUserId();
+        return self.getScormStoredData(scormId, attempt, userId, true).then(function(entries) {
+            var promises = [],
+                db = $mmSite.getDb();
+            angular.forEach(entries, function(entry) {
+                if (entry.scoid == scoId) {
+                    entry.synced = 1;
+                    promises.push(db.insert(mmaModScormOfflineTracksStore, entry));
+                }
             });
+            return $q.all(promises);
         });
     };
         function removeDefaultData(userData) {
@@ -19298,25 +17490,20 @@ angular.module('mm.addons.mod_scorm')
         });
         return result;
     }
-        self.saveTracks = function(siteId, scorm, scoId, attempt, tracks, userData) {
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            var userId = site.getUserId(),
-                initialBlocked;
-            if (!blockedScorms[siteId]) {
-                blockedScorms[siteId] = {};
+        self.saveTracks = function(scorm, scoId, attempt, tracks, userData) {
+        var userId = $mmSite.getUserId(),
+            initialBlocked = !!blockedScorms[scorm.id];
+        blockedScorms[scorm.id] = true;
+        var promises = [];
+        angular.forEach(tracks, function(track) {
+            promises.push(
+                insertTrack(userId, scorm.id, scoId, attempt, track.element, track.value, scorm.forcecompleted, userData[scoId])
+            );
+        });
+        return $q.all(promises).finally(function() {
+            if (!initialBlocked) {
+                blockedScorms[scorm.id] = false;
             }
-            initialBlocked = !!blockedScorms[siteId][scorm.id];
-            blockedScorms[siteId][scorm.id] = true;
-            var promises = [];
-            angular.forEach(tracks, function(track) {
-                promises.push(insertTrack(siteId, userId, scorm.id, scoId, attempt,
-                                            track.element, track.value, scorm.forcecompleted, userData[scoId]));
-            });
-            return $q.all(promises).finally(function() {
-                if (!initialBlocked) {
-                    blockedScorms[siteId][scorm.id] = false;
-                }
-            });
         });
     };
         self.saveTracksSync = function(scorm, scoId, attempt, tracks, userData) {
@@ -19339,57 +17526,52 @@ angular.module('mm.addons.mod_scorm')
         }
         return ifempty;
     }
-        self.setAttemptSnapshot = function(siteId, scormId, attempt, userData, userId) {
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            $log.debug('Set snapshot for attempt ' + attempt + ' in SCORM ' + scormId);
-            userId = userId || site.getUserId();
-            return site.getDb().get(mmaModScormOfflineAttemptsStore, [scormId, userId, attempt]).then(function(entry) {
-                entry.snapshot = removeDefaultData(userData);
-                entry.timemodified = $mmUtil.timestamp();
-                return site.getDb().insert(mmaModScormOfflineAttemptsStore, entry);
-            });
+        self.setAttemptSnapshot = function(scormId, attempt, userData, userId) {
+        $log.debug('Set snapshot for attempt ' + attempt + ' in SCORM ' + scormId);
+        userId = userId || $mmSite.getUserId();
+        return $mmSite.getDb().get(mmaModScormOfflineAttemptsStore, [scormId, userId, attempt]).then(function(entry) {
+            entry.snapshot = removeDefaultData(userData);
+            entry.timemodified = $mmUtil.timestamp();
+            return $mmSite.getDb().insert(mmaModScormOfflineAttemptsStore, entry);
         });
     };
     return self;
 }]);
 
 angular.module('mm.addons.mod_scorm')
-.factory('$mmaModScormOnline', ["$mmSitesManager", "$mmSite", "$q", "$mmWS", "$log", "mmCoreWSPrefix", function($mmSitesManager, $mmSite, $q, $mmWS, $log, mmCoreWSPrefix) {
+.factory('$mmaModScormOnline', ["$mmSite", "$q", "$mmWS", "$log", "mmCoreWSPrefix", function($mmSite, $q, $mmWS, $log, mmCoreWSPrefix) {
     $log = $log.getInstance('$mmaModScormOnline');
     var self = {},
         blockedScorms = {};
-        self.clearBlockedScorms = function(siteId) {
-        if (siteId) {
-            delete blockedScorms[siteId];
-        } else {
-            blockedScorms = {};
-        }
+        self.clearBlockedScorms = function() {
+        blockedScorms = {};
     };
         function getAttemptCountCacheKey(scormId, userId) {
         userId = userId || $mmSite.getUserId();
         return 'mmaModScorm:attemptcount:' + scormId + ':' + userId;
     }
-        self.getAttemptCount = function(siteId, scormId, userId, ignoreMissing, ignoreCache) {
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            userId = userId || site.getUserId();
-            var params = {
-                    scormid: scormId,
-                    userid: userId,
-                    ignoremissingcompletion: ignoreMissing ? 1 : 0
-                },
-                preSets = {
-                    cacheKey: getAttemptCountCacheKey(scormId, userId)
-                };
-            if (ignoreCache) {
-                preSets.getFromCache = 0;
-                preSets.emergencyCache = 0;
+        self.getAttemptCount = function(scormId, userId, ignoreMissing, ignoreCache) {
+        userId = userId || $mmSite.getUserId();
+        if (!$mmSite.isLoggedIn()) {
+            return $q.reject();
+        }
+        var params = {
+                scormid: scormId,
+                userid: userId,
+                ignoremissingcompletion: ignoreMissing ? 1 : 0
+            },
+            preSets = {
+                cacheKey: getAttemptCountCacheKey(scormId, userId)
+            };
+        if (ignoreCache) {
+            preSets.getFromCache = 0;
+            preSets.emergencyCache = 0;
+        }
+        return $mmSite.read('mod_scorm_get_scorm_attempt_count', params, preSets).then(function(response) {
+            if (response && typeof response.attemptscount != 'undefined') {
+                return response.attemptscount;
             }
-            return site.read('mod_scorm_get_scorm_attempt_count', params, preSets).then(function(response) {
-                if (response && typeof response.attemptscount != 'undefined') {
-                    return response.attemptscount;
-                }
-                return $q.reject();
-            });
+            return $q.reject();
         });
     };
         function getScormUserDataCacheKey(scormId, attempt) {
@@ -19398,80 +17580,71 @@ angular.module('mm.addons.mod_scorm')
         function getScormUserDataCommonCacheKey(scormId) {
         return 'mmaModScorm:userdata:' + scormId;
     }
-        self.getScormUserData = function(siteId, scormId, attempt, ignoreCache) {
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            var params = {
-                    scormid: scormId,
-                    attempt: attempt
-                },
-                preSets = {
-                    cacheKey: getScormUserDataCacheKey(scormId, attempt)
-                };
-            if (ignoreCache) {
-                preSets.getFromCache = 0;
-                preSets.emergencyCache = 0;
-            }
-            return site.read('mod_scorm_get_scorm_user_data', params, preSets).then(function(response) {
-                if (response && response.data) {
-                    var data = {};
-                    angular.forEach(response.data, function(sco) {
-                        var formattedDefaultData = {},
-                            formattedUserData = {};
-                        angular.forEach(sco.defaultdata, function(entry) {
-                            formattedDefaultData[entry.element] = entry.value;
-                        });
-                        angular.forEach(sco.userdata, function(entry) {
-                            formattedUserData[entry.element] = entry.value;
-                        });
-                        sco.defaultdata = formattedDefaultData;
-                        sco.userdata = formattedUserData;
-                        data[sco.scoid] = sco;
-                    });
-                    return data;
-                }
-                return $q.reject();
-            });
-        });
-    };
-        self.invalidateAttemptCount = function(siteId, scormId, userId) {
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            userId = userId || site.getUserId();
-            return site.invalidateWsCacheForKey(getAttemptCountCacheKey(scormId, userId));
-        });
-    };
-        self.invalidateScormUserData = function(siteId, scormId) {
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            return site.invalidateWsCacheForKeyStartingWith(getScormUserDataCommonCacheKey(scormId));
-        });
-    };
-        self.isScormBlocked = function(siteId, scormId) {
-        if (!blockedScorms[siteId]) {
-            return false;
-        }
-        return !!blockedScorms[siteId][scormId];
-    };
-        self.saveTracks = function(siteId, scormId, scoId, attempt, tracks) {
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            var params = {
-                scoid: scoId,
-                attempt: attempt,
-                tracks: tracks
+        self.getScormUserData = function(scormId, attempt, ignoreCache) {
+        var params = {
+                scormid: scormId,
+                attempt: attempt
+            },
+            preSets = {
+                cacheKey: getScormUserDataCacheKey(scormId, attempt)
             };
-            if (!tracks || !tracks.length) {
-                return $q.when();
+        if (ignoreCache) {
+            preSets.getFromCache = 0;
+            preSets.emergencyCache = 0;
+        }
+        if (!$mmSite.isLoggedIn()) {
+            return $q.reject();
+        }
+        return $mmSite.read('mod_scorm_get_scorm_user_data', params, preSets).then(function(response) {
+            if (response && response.data) {
+                var data = {};
+                angular.forEach(response.data, function(sco) {
+                    var formattedDefaultData = {},
+                        formattedUserData = {};
+                    angular.forEach(sco.defaultdata, function(entry) {
+                        formattedDefaultData[entry.element] = entry.value;
+                    });
+                    angular.forEach(sco.userdata, function(entry) {
+                        formattedUserData[entry.element] = entry.value;
+                    });
+                    sco.defaultdata = formattedDefaultData;
+                    sco.userdata = formattedUserData;
+                    data[sco.scoid] = sco;
+                });
+                return data;
             }
-            if (!blockedScorms[siteId]) {
-                blockedScorms[siteId] = {};
+            return $q.reject();
+        });
+    };
+        self.invalidateAttemptCount = function(scormId, userId) {
+        return $mmSite.invalidateWsCacheForKey(getAttemptCountCacheKey(scormId, userId));
+    };
+        self.invalidateScormUserData = function(scormId) {
+        return $mmSite.invalidateWsCacheForKeyStartingWith(getScormUserDataCommonCacheKey(scormId));
+    };
+        self.isScormBlocked = function(scormId) {
+        return !!blockedScorms[scormId];
+    };
+        self.saveTracks = function(scormId, scoId, attempt, tracks) {
+        var params = {
+            scoid: scoId,
+            attempt: attempt,
+            tracks: tracks
+        };
+        if (!tracks || !tracks.length) {
+            return $q.when();
+        }
+        if (!$mmSite.isLoggedIn()) {
+            return $q.reject();
+        }
+        blockedScorms[scormId] = true;
+        return $mmSite.write('mod_scorm_insert_scorm_tracks', params).then(function(response) {
+            if (response && response.trackids) {
+                return response.trackids;
             }
-            blockedScorms[siteId][scormId] = true;
-            return site.write('mod_scorm_insert_scorm_tracks', params).then(function(response) {
-                if (response && response.trackids) {
-                    return response.trackids;
-                }
-                return $q.reject();
-            }).finally(function() {
-                blockedScorms[siteId][scormId] = false;
-            });
+            return $q.reject();
+        }).finally(function() {
+            blockedScorms[scormId] = false;
         });
     };
         self.saveTracksSync = function(scoId, attempt, tracks) {
@@ -19518,32 +17691,26 @@ angular.module('mm.addons.mod_scorm')
     ];
     $mmSitesFactoryProvider.registerStores(stores);
 }])
-.factory('$mmaModScormSync', ["$mmaModScorm", "$mmSite", "$q", "$translate", "$mmaModScormOnline", "$mmaModScormOffline", "$mmUtil", "$log", "mmaModScormSynchronizationStore", "mmaModScormSyncTime", "$mmConfig", "mmCoreSettingsSyncOnlyOnWifi", "$mmApp", "$mmEvents", "mmaModScormEventAutomSynced", "$mmSitesManager", function($mmaModScorm, $mmSite, $q, $translate, $mmaModScormOnline, $mmaModScormOffline, $mmUtil,
+.factory('$mmaModScormSync', ["$mmaModScorm", "$mmSite", "$q", "$translate", "$mmaModScormOnline", "$mmaModScormOffline", "$mmUtil", "$log", "mmaModScormSynchronizationStore", "mmaModScormSyncTime", "$mmConfig", "mmCoreSettingsSyncOnlyOnWifi", "$mmApp", "$mmEvents", "mmaModScormEventAutomSynced", function($mmaModScorm, $mmSite, $q, $translate, $mmaModScormOnline, $mmaModScormOffline, $mmUtil,
             $log, mmaModScormSynchronizationStore, mmaModScormSyncTime, $mmConfig, mmCoreSettingsSyncOnlyOnWifi, $mmApp,
-            $mmEvents, mmaModScormEventAutomSynced, $mmSitesManager) {
+            $mmEvents, mmaModScormEventAutomSynced) {
     $log = $log.getInstance('$mmaModScormSync');
     var self = {},
         syncPromises = {};
-        self.getScormSyncTime = function(scormId, siteId) {
-        siteId = siteId || $mmSite.getId();
-        return $mmSitesManager.getSiteDb(siteId).then(function(db) {
-            return db.get(mmaModScormSynchronizationStore, scormId).then(function(entry) {
-                return entry.time;
-            }).catch(function() {
-                return 0;
-            });
+        self.getScormSyncTime = function(scormId) {
+        return $mmSite.getDb().get(mmaModScormSynchronizationStore, scormId).then(function(entry) {
+            return entry.time;
+        }).catch(function() {
+            return 0;
         });
     };
-        self.setScormSyncTime = function(scormId, siteId, time) {
-        siteId = siteId || $mmSite.getId();
-        return $mmSitesManager.getSiteDb(siteId).then(function(db) {
-            if (typeof time == 'undefined') {
-                time = new Date().getTime();
-            }
-            return db.insert(mmaModScormSynchronizationStore, {scormid: scormId, time: time});
-        });
+        self.setScormSyncTime = function(scormId, time) {
+        if (typeof time == 'undefined') {
+            time = new Date().getTime();
+        }
+        return $mmSite.getDb().insert(mmaModScormSynchronizationStore, {scormid: scormId, time: time});
     };
-        self.syncAllScorms = function(siteId) {
+        self.syncAllScorms = function() {
         if (!$mmApp.isOnline()) {
             $log.debug('Cannot sync all SCORMs because device is offline.');
             return $q.reject();
@@ -19553,55 +17720,40 @@ angular.module('mm.addons.mod_scorm')
                 $log.debug('Cannot sync all SCORMs because device isn\'t using a WiFi network.');
                 return $q.reject();
             }
-            var promise;
-            if (!siteId) {
-                $log.debug('Try to sync SCORMs in all sites.');
-                promise = $mmSitesManager.getSitesIds();
-            } else {
-                $log.debug('Try to sync SCORMs in site ' + siteId);
-                promise = $q.when([siteId]);
-            }
-            return promise.then(function(siteIds) {
-                var sitePromises = [];
-                angular.forEach(siteIds, function(siteId) {
-                    sitePromises.push($mmaModScormOffline.getAllAttempts(siteId).then(function(attempts) {
-                        var scorms = [],
-                            ids = [],
-                            promises = [];
-                        angular.forEach(attempts, function(attempt) {
-                            if (ids.indexOf(attempt.scormid) == -1) {
-                                ids.push(attempt.scormid);
-                                scorms.push({
-                                    id: attempt.scormid,
-                                    courseid: attempt.courseid
-                                });
-                            }
+            return $mmaModScormOffline.getAllAttempts().then(function(attempts) {
+                var scorms = [],
+                    ids = [],
+                    promises = [],
+                    siteId = $mmSite.getId();
+                angular.forEach(attempts, function(attempt) {
+                    if (ids.indexOf(attempt.scormid) == -1) {
+                        ids.push(attempt.scormid);
+                        scorms.push({
+                            id: attempt.scormid,
+                            courseid: attempt.courseid
                         });
-                        angular.forEach(scorms, function(scorm) {
-                            if (!$mmaModScorm.isScormBeingPlayed(scorm.id, siteId)) {
-                                promises.push($mmaModScorm.getScormById(scorm.courseid, scorm.id, '', siteId).then(function(scorm) {
-                                    return self.syncScormIfNeeded(scorm, siteId).then(function(warnings) {
-                                        if (typeof warnings != 'undefined') {
-                                            $mmEvents.trigger(mmaModScormEventAutomSynced, {
-                                                siteid: siteId,
-                                                scormid: scorm.id
-                                            });
-                                        }
-                                    });
-                                }));
-                            }
-                        });
-                        return $q.all(promises);
-                    }));
+                    }
                 });
-                return $q.all(sitePromises);
+                angular.forEach(scorms, function(scorm) {
+                    if (!$mmaModScorm.isScormBeingPlayed(scorm.id)) {
+                        promises.push($mmaModScorm.getScormById(scorm.courseid, scorm.id).then(function(scorm) {
+                            return self.syncScormIfNeeded(scorm).then(function(warnings) {
+                                if (typeof warnings != 'undefined') {
+                                    $mmEvents.trigger(mmaModScormEventAutomSynced, {
+                                        siteid: siteId,
+                                        scormid: scorm.id
+                                    });
+                                }
+                            });
+                        }));
+                    }
+                });
             });
         });
     };
-        self._syncAttempt = function(scormId, attempt, siteId) {
-        siteId = siteId || $mmSite.getId();
-        $log.debug('Try to sync attempt ' + attempt + ' in SCORM ' + scormId + ' and site ' + siteId);
-        return $mmaModScormOffline.getScormStoredData(siteId, scormId, attempt, undefined, true).then(function(entries) {
+        self._syncAttempt = function(scormId, attempt) {
+        $log.debug('Try to sync attempt ' + attempt + ' in SCORM ' + scormId);
+        return $mmaModScormOffline.getScormStoredData(scormId, attempt, undefined, true).then(function(entries) {
             var scos = {},
                 promises = [],
                 somethingSynced = false;
@@ -19617,23 +17769,23 @@ angular.module('mm.addons.mod_scorm')
                 }
             });
             angular.forEach(scos, function(tracks, scoId) {
-                promises.push($mmaModScormOnline.saveTracks(siteId, scormId, scoId, attempt, tracks).then(function() {
-                    return $mmaModScormOffline.markAsSynced(siteId, scormId, attempt, undefined, scoId).catch(function() {
+                promises.push($mmaModScormOnline.saveTracks(scormId, scoId, attempt, tracks).then(function() {
+                    return $mmaModScormOffline.markAsSynced(scormId, attempt, undefined, scoId).catch(function() {
                     }).then(function() {
                         somethingSynced = true;
                     });
                 }));
             });
             return $mmUtil.allPromises(promises).then(function() {
-                return $mmaModScormOffline.deleteAttempt(siteId, scormId, attempt).catch(function() {
-                    return $mmaModScormOffline.deleteAttempt(siteId, scormId, attempt).catch(function() {
+                return $mmaModScormOffline.deleteAttempt(scormId, attempt).catch(function() {
+                    return $mmaModScormOffline.deleteAttempt(scormId, attempt).catch(function() {
                         $log.error('After sync: error deleting attempt ' + attempt + ' in SCORM ' + scormId);
                     });
                 });
             }).catch(function() {
                 if (somethingSynced) {
                     $log.error('Error synchronizing some SCOs for attempt ' + attempt + ' in SCORM ' + scormId + '. Saving snapshot.');
-                    return saveSyncSnapshot(scormId, attempt, siteId).then(function() {
+                    return saveSyncSnapshot(scormId, attempt).then(function() {
                         return $q.reject();
                     });
                 } else {
@@ -19643,15 +17795,14 @@ angular.module('mm.addons.mod_scorm')
             });
         });
     };
-        function saveSyncSnapshot(scormId, attempt, siteId) {
-        return $mmaModScorm.getScormUserData(scormId, attempt, false, siteId, undefined, true).then(function(data) {
-            return $mmaModScormOffline.setAttemptSnapshot(siteId, scormId, attempt, data);
+        function saveSyncSnapshot(scormId, attempt) {
+        return $mmaModScorm.getScormUserData(scormId, attempt, false, undefined, true).then(function(data) {
+            return $mmaModScormOffline.setAttemptSnapshot(scormId, attempt, data);
         }, function() {
-            return $mmaModScorm.getScormUserData(scormId, attempt, false, siteId).catch(function() {
+            return $mmaModScorm.getScormUserData(scormId, attempt, false).catch(function() {
                 return {};
             }).then(function(data) {
-                return $mmaModScormOffline.getScormStoredData(siteId, scormId, attempt, undefined, false, true)
-                            .then(function(synced) {
+                return $mmaModScormOffline.getScormStoredData(scormId, attempt, undefined, false, true).then(function(synced) {
                     angular.forEach(synced, function(entry) {
                         if (!data[entry.scoid]) {
                             data[entry.scoid] = {
@@ -19661,22 +17812,21 @@ angular.module('mm.addons.mod_scorm')
                         }
                         data[entry.scoid].userdata[entry.element] = entry.value;
                     });
-                    return $mmaModScormOffline.setAttemptSnapshot(siteId, scormId, attempt, data);
+                    return $mmaModScormOffline.setAttemptSnapshot(scormId, attempt, data);
                 });
             });
         });
     }
-        self.syncScormIfNeeded = function(scorm, siteId) {
-        siteId = siteId || $mmSite.getId();
-        return self.getScormSyncTime(scorm.id, siteId).then(function(time) {
+        self.syncScormIfNeeded = function(scorm) {
+        return self.getScormSyncTime(scorm.id).then(function(time) {
             if (new Date().getTime() - mmaModScormSyncTime >= time) {
-                return self.syncScorm(scorm, siteId);
+                return self.syncScorm(scorm);
             }
         });
     };
-        self.syncScorm = function(scorm, siteId) {
-        siteId = siteId || $mmSite.getId();
+        self.syncScorm = function(scorm) {
         var warnings = [],
+            siteId = $mmSite.getId(),
             syncPromise,
             deleted = false;
         if (syncPromises[siteId] && syncPromises[siteId][scorm.id]) {
@@ -19684,22 +17834,20 @@ angular.module('mm.addons.mod_scorm')
         } else if (!syncPromises[siteId]) {
             syncPromises[siteId] = {};
         }
-        if ($mmaModScormOnline.isScormBlocked(siteId, scorm.id) || $mmaModScormOffline.isScormBlocked(siteId, scorm.id)) {
-            $log.debug('Cannot sync SCORM ' + scorm.id + ' because it is blocked.');
+        if ($mmaModScormOnline.isScormBlocked(scorm.id) || $mmaModScormOffline.isScormBlocked(scorm.id)) {
             return $q.reject();
         }
-        $log.debug('Try to sync SCORM ' + scorm.id + ' in site ' + siteId);
         function finishSync() {
-            return $mmaModScorm.invalidateAllScormData(scorm.id, siteId).catch(function() {}).then(function() {
-                return $mmaModScorm.prefetchData(scorm, siteId).then(function() {
-                    return self.setScormSyncTime(scorm.id, siteId).catch(function() {
+            return $mmaModScorm.invalidateAllScormData(scorm.id).catch(function() {}).then(function() {
+                return $mmaModScorm.prefetchData(scorm).then(function() {
+                    return self.setScormSyncTime(scorm.id).catch(function() {
                     }).then(function() {
                         return warnings;
                     });
                 });
             });
         }
-        syncPromise = $mmaModScorm.getAttemptCount(scorm.id, siteId, undefined, false, true).then(function(attemptsData) {
+        syncPromise = $mmaModScorm.getAttemptCount(scorm.id, $mmSite.getUserId(), false, true).then(function(attemptsData) {
             if (!attemptsData.offline || !attemptsData.offline.length) {
                 return finishSync();
             }
@@ -19712,22 +17860,22 @@ angular.module('mm.addons.mod_scorm')
                     collisions.push(attempt);
                 }
             });
-            promise = lastOnline > 0 ? $mmaModScorm.isAttemptIncomplete(scorm.id, lastOnline, false, true, siteId) : $q.when(false);
+            promise = lastOnline > 0 ? $mmaModScorm.isAttemptIncomplete(scorm.id, lastOnline, false, true) : $q.when(false);
             return promise.then(function(incomplete) {
                 if (!collisions.length && !incomplete) {
                     var promises = [];
                     angular.forEach(attemptsData.offline, function(attempt) {
                         if (scorm.maxattempt == 0 || attempt <= scorm.maxattempt) {
-                            promises.push(self._syncAttempt(scorm.id, attempt, siteId));
+                            promises.push(self._syncAttempt(scorm.id, attempt));
                         }
                     });
                     return $q.all(promises).then(function() {
                         return finishSync();
                     });
                 } else if (collisions.length) {
-                    return treatCollisions(scorm.id, siteId, collisions, lastOnline, attemptsData.offline).then(function(warns) {
+                    return treatCollisions(scorm.id, collisions, lastOnline, attemptsData.offline).then(function(warns) {
                         warnings = warnings.concat(warns);
-                        return $mmaModScormOffline.getAttempts(siteId, scorm.id).then(function(entries) {
+                        return $mmaModScormOffline.getAttempts(scorm.id, $mmSite.getUserId()).then(function(entries) {
                             var promises = [],
                                 cannotSyncSome = false;
                             entries = entries.map(function(entry) {
@@ -19739,7 +17887,7 @@ angular.module('mm.addons.mod_scorm')
                             angular.forEach(entries, function(attempt) {
                                 if (!incomplete || attempt <= lastOnline) {
                                     if (scorm.maxattempt == 0 || attempt <= scorm.maxattempt) {
-                                        promises.push(self._syncAttempt(scorm.id, attempt, siteId));
+                                        promises.push(self._syncAttempt(scorm.id, attempt));
                                     }
                                 } else {
                                     cannotSyncSome = true;
@@ -19767,19 +17915,20 @@ angular.module('mm.addons.mod_scorm')
         }
         return syncPromise;
     };
-        function treatCollisions(scormId, siteId, collisions, lastOnline, offlineAttempts) {
+        function treatCollisions(scormId, collisions, lastOnline, offlineAttempts) {
         var warnings = [],
             promises = [],
             newAttemptsSameOrder = [],
             newAttemptsAtEnd = {},
+            userId = $mmSite.getUserId(),
             lastCollision = Math.max.apply(Math, collisions),
             lastOffline = Math.max.apply(Math, offlineAttempts),
             lastOfflineIncomplete,
             lastOfflineCreated;
         function getLastOfflineAttemptData() {
-            return $mmaModScorm.isAttemptIncomplete(scormId, lastOffline, true, false, siteId).then(function(incomplete) {
+            return $mmaModScorm.isAttemptIncomplete(scormId, lastOffline, true).then(function(incomplete) {
                 lastOfflineIncomplete = incomplete;
-                return $mmaModScormOffline.getAttemptCreationTime(siteId, scormId, lastOffline).then(function(time) {
+                return $mmaModScormOffline.getAttemptCreationTime(scormId, lastOffline).then(function(time) {
                     lastOfflineCreated = time;
                 });
             });
@@ -19789,11 +17938,11 @@ angular.module('mm.addons.mod_scorm')
                 newAttemptsSameOrder.push(attempt);
                 return $q.when();
             }
-            return $mmaModScormOffline.getAttemptCreationTime(siteId, scormId, attempt).then(function(time) {
+            return $mmaModScormOffline.getAttemptCreationTime(scormId, attempt).then(function(time) {
                 if (time > lastOfflineCreated) {
                     if (lastOfflineIncomplete) {
                         $log.debug('Try to delete attempt ' + attempt + ' because it cannot be created as a new attempt.');
-                        return $mmaModScormOffline.deleteAttempt(siteId, scormId, attempt).then(function() {
+                        return $mmaModScormOffline.deleteAttempt(scormId, attempt).then(function() {
                             warnings.push($translate.instant('mma.mod_scorm.warningofflinedatadeleted', {number: attempt}));
                         }).catch(function() {
                         });
@@ -19807,10 +17956,9 @@ angular.module('mm.addons.mod_scorm')
         }
         return getLastOfflineAttemptData().then(function() {
             collisions.forEach(function(attempt) {
-                var getDataFn = $mmaModScormOffline.getScormStoredData,
-                    promise = getDataFn(siteId, scormId, attempt, undefined, false, true).then(function(synced) {
+                var promise = $mmaModScormOffline.getScormStoredData(scormId, attempt, userId, false, true).then(function(synced) {
                     if (synced && synced.length) {
-                        return getDataFn(siteId, scormId, attempt, undefined, true).then(function(entries) {
+                        return $mmaModScormOffline.getScormStoredData(scormId, attempt, userId, true).then(function(entries) {
                             var hasDataToSend = false;
                             angular.forEach(entries, function(entry) {
                                 if (entry.element.indexOf('.') > -1) {
@@ -19818,20 +17966,19 @@ angular.module('mm.addons.mod_scorm')
                                 }
                             });
                             if (hasDataToSend) {
-                                return canRetrySync(scormId, siteId, attempt, lastOnline).catch(function() {
+                                return canRetrySync(scormId, attempt, lastOnline).catch(function() {
                                     return addToNewOrDelete(attempt);
                                 });
                             } else {
-                                return $mmaModScormOffline.deleteAttempt(siteId, scormId, attempt).catch(function() {
+                                return $mmaModScormOffline.deleteAttempt(scormId, attempt).catch(function() {
                                 });
                             }
                         });
                     } else {
-                        return $mmaModScormOffline.getAttemptSnapshot(siteId, scormId, attempt).then(function(snapshot) {
+                        return $mmaModScormOffline.getAttemptSnapshot(scormId, attempt).then(function(snapshot) {
                             if (snapshot && Object.keys(snapshot).length) {
                                 var refresh = lastOnline != attempt;
-                                return $mmaModScorm.getScormUserData(scormId, attempt, false, siteId, undefined, refresh)
-                                            .then(function(data) {
+                                return $mmaModScorm.getScormUserData(scormId, attempt, false, undefined, refresh).then(function(data) {
                                     if (!snapshotEquals(snapshot, data)) {
                                         return addToNewOrDelete(attempt);
                                     }
@@ -19845,16 +17992,16 @@ angular.module('mm.addons.mod_scorm')
                 promises.push(promise);
             });
             return $q.all(promises).then(function() {
-                return moveNewAttempts(scormId, siteId, newAttemptsSameOrder, lastOnline, lastCollision, offlineAttempts).then(function() {
+                return moveNewAttempts(scormId, newAttemptsSameOrder, lastOnline, lastCollision, offlineAttempts).then(function() {
                     lastOffline = lastOffline + newAttemptsSameOrder.length;
-                    return createNewAttemptsAtEnd(scormId, siteId, newAttemptsAtEnd, lastOffline).then(function() {
+                    return createNewAttemptsAtEnd(scormId, newAttemptsAtEnd, lastOffline).then(function() {
                         return warnings;
                     });
                 });
             });
         });
     }
-        function moveNewAttempts(scormId, siteId, newAttempts, lastOnline, lastCollision, offlineAttempts) {
+        function moveNewAttempts(scormId, newAttempts, lastOnline, lastCollision, offlineAttempts) {
         if (!newAttempts.length) {
             return $q.when();
         }
@@ -19866,8 +18013,7 @@ angular.module('mm.addons.mod_scorm')
         angular.forEach(offlineAttempts, function(attempt) {
             if (attempt > lastCollision) {
                 promise = promise.then(function() {
-                    var newNumber = attempt + newAttempts.length;
-                    return $mmaModScormOffline.changeAttemptNumber(siteId, scormId, attempt, newNumber).then(function() {
+                    return $mmaModScormOffline.changeAttemptNumber(scormId, attempt, attempt + newAttempts.length).then(function() {
                         lastSuccessful = attempt;
                     });
                 });
@@ -19880,16 +18026,15 @@ angular.module('mm.addons.mod_scorm')
                 return parseInt(a, 10) > parseInt(b, 10);
             });
             angular.forEach(newAttempts, function(attempt, index) {
-                var newNumber = lastOnline + index + 1;
-                promises.push($mmaModScormOffline.changeAttemptNumber(siteId, scormId, attempt, newNumber).then(function() {
+                promises.push($mmaModScormOffline.changeAttemptNumber(scormId, attempt, lastOnline + index + 1).then(function() {
                     successful.push(attempt);
                 }));
             });
             return $q.all(promises).catch(function() {
                 promises = [];
                 angular.forEach(successful, function(attempt) {
-                    var newNumber = lastOnline + newAttempts.indexOf(attempt) + 1;
-                    promises.push($mmaModScormOffline.changeAttemptNumber(siteId, scormId, newNumber, attempt));
+                    var newAttemptNumber = lastOnline + newAttempts.indexOf(attempt) + 1;
+                    promises.push($mmaModScormOffline.changeAttemptNumber(scormId, newAttemptNumber, attempt));
                 });
                 return $mmUtil.allPromises(promises).then(function() {
                     return $q.reject();
@@ -19906,7 +18051,7 @@ angular.module('mm.addons.mod_scorm')
             }
             attemptsToUndo.forEach(function(attempt) {
                 promise = promise.then(function() {
-                    return $mmaModScormOffline.changeAttemptNumber(siteId, scormId, attempt + newAttempts.length, attempt);
+                    return $mmaModScormOffline.changeAttemptNumber(scormId, attempt + newAttempts.length, attempt);
                 });
             });
             return promise.then(function() {
@@ -19914,7 +18059,7 @@ angular.module('mm.addons.mod_scorm')
             });
         });
     }
-        function createNewAttemptsAtEnd(scormId, siteId, newAttempts, lastOffline) {
+        function createNewAttemptsAtEnd(scormId, newAttempts, lastOffline) {
         var times = Object.keys(newAttempts).sort(),
             promises = [];
         if (!times.length) {
@@ -19922,14 +18067,13 @@ angular.module('mm.addons.mod_scorm')
         }
         angular.forEach(times, function(time, index) {
             var attempt = newAttempts[time];
-            promises.push($mmaModScormOffline.changeAttemptNumber(siteId, scormId, attempt, lastOffline + index + 1));
+            promises.push($mmaModScormOffline.changeAttemptNumber(scormId, attempt, lastOffline + index + 1));
         });
         return $mmUtil.allPromises(promises);
     }
-        function canRetrySync(scormId, siteId, attempt, lastOnline) {
-        var refresh = lastOnline != attempt;
-        return $mmaModScorm.getScormUserData(scormId, attempt, false, siteId, undefined, refresh).then(function(siteData) {
-            return $mmaModScormOffline.getAttemptSnapshot(siteId, scormId, attempt).then(function(snapshot) {
+        function canRetrySync(scormId, attempt, lastOnline) {
+        return $mmaModScorm.getScormUserData(scormId, attempt, false, undefined, lastOnline != attempt).then(function(siteData) {
+            return $mmaModScormOffline.getAttemptSnapshot(scormId, attempt).then(function(snapshot) {
                 if (!snapshot || !Object.keys(snapshot).length || !snapshotEquals(snapshot, siteData)) {
                     return $q.reject();
                 }
@@ -19965,8 +18109,8 @@ angular.module('mm.addons.mod_scorm')
         }
         return true;
     }
-        self.waitForSync = function(scormId, siteId) {
-        siteId = siteId || $mmSite.getId();
+        self.waitForSync = function(scormId) {
+        var siteId = $mmSite.getId();
         if (syncPromises[siteId] && syncPromises[siteId][scormId]) {
             return syncPromises[siteId][scormId].catch(function() {});
         }
@@ -20080,57 +18224,25 @@ angular.module('mm.addons.mod_survey')
 }]);
 
 angular.module('mm.addons.mod_survey')
-.factory('$mmaModSurveyHandlers', ["$mmCourse", "$mmaModSurvey", "$state", "$q", "$mmContentLinksHelper", function($mmCourse, $mmaModSurvey, $state, $q, $mmContentLinksHelper) {
+.factory('$mmaModSurveyCourseContentHandler', ["$mmCourse", "$mmaModSurvey", "$state", function($mmCourse, $mmaModSurvey, $state) {
     var self = {};
-        self.courseContent = function() {
-        var self = {};
-                self.isEnabled = function() {
-            return $mmaModSurvey.isPluginEnabled();
-        };
-                self.getController = function(module, courseid) {
-            return function($scope) {
-                $scope.title = module.name;
-                $scope.icon = $mmCourse.getModuleIconSrc('survey');
-                $scope.action = function(e) {
-                    if (e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                    }
-                    $state.go('site.mod_survey', {module: module, courseid: courseid});
-                };
+        self.isEnabled = function() {
+        return $mmaModSurvey.isPluginEnabled();
+    };
+        self.getController = function(module, courseid) {
+        return function($scope) {
+            $scope.title = module.name;
+            $scope.icon = $mmCourse.getModuleIconSrc('survey');
+            $scope.action = function() {
+                $state.go('site.mod_survey', {module: module, courseid: courseid});
             };
         };
-        return self;
-    };
-        self.linksHandler = function() {
-        var self = {};
-                function isEnabled(siteId, courseId) {
-            return $mmaModSurvey.isPluginEnabled(siteId).then(function(enabled) {
-                if (!enabled) {
-                    return false;
-                }
-                return courseId || $mmCourse.canGetModuleWithoutCourseId(siteId);
-            });
-        }
-                self.getActions = function(siteIds, url, courseId) {
-            if (typeof self.handles(url) != 'undefined') {
-                return $mmContentLinksHelper.treatModuleIndexUrl(siteIds, url, isEnabled, courseId);
-            }
-            return $q.when([]);
-        };
-                self.handles = function(url) {
-            var position = url.indexOf('/mod/survey/view.php');
-            if (position > -1) {
-                return url.substr(0, position);
-            }
-        };
-        return self;
     };
     return self;
 }]);
 
 angular.module('mm.addons.mod_survey')
-.factory('$mmaModSurvey', ["$q", "$mmSite", "$translate", "$mmSitesManager", function($q, $mmSite, $translate, $mmSitesManager) {
+.factory('$mmaModSurvey', ["$q", "$mmSite", "$translate", function($q, $mmSite, $translate) {
     var self = {};
         function commaStringToArray(value) {
         if (typeof value == 'string') {
@@ -20247,13 +18359,10 @@ angular.module('mm.addons.mod_survey')
         self.invalidateSurveyData = function(courseid) {
         return $mmSite.invalidateWsCacheForKey(getSurveyDataCacheKey(courseid));
     };
-        self.isPluginEnabled = function(siteId) {
-        siteId = siteId || $mmSite.getId();
-        return $mmSitesManager.getSite(siteId).then(function(site) {
-            return  site.wsAvailable('mod_survey_get_questions') &&
-                    site.wsAvailable('mod_survey_get_surveys_by_courses') &&
-                    site.wsAvailable('mod_survey_submit_answers');
-        });
+        self.isPluginEnabled = function() {
+        return  $mmSite.wsAvailable('mod_survey_get_questions') &&
+                $mmSite.wsAvailable('mod_survey_get_surveys_by_courses') &&
+                $mmSite.wsAvailable('mod_survey_submit_answers');
     };
         self.logView = function(id) {
         if (id) {
@@ -20294,65 +18403,33 @@ angular.module('mm.addons.mod_url')
 }]);
 
 angular.module('mm.addons.mod_url')
-.factory('$mmaModUrlHandlers', ["$mmCourse", "$mmaModUrl", "$state", "$mmUtil", "$mmContentLinksHelper", "$q", function($mmCourse, $mmaModUrl, $state, $mmUtil, $mmContentLinksHelper, $q) {
+.factory('$mmaModUrlCourseContentHandler', ["$mmCourse", "$mmaModUrl", "$state", function($mmCourse, $mmaModUrl, $state) {
     var self = {};
-        self.courseContentHandler = function() {
-        var self = {};
-                self.isEnabled = function() {
-            return true;
-        };
-                self.getController = function(module, courseid) {
-            return function($scope) {
-                $scope.icon = $mmCourse.getModuleIconSrc('url');
-                $scope.title = module.name;
-                $scope.action = function(e) {
-                    if (e) {
+        self.isEnabled = function() {
+        return true;
+    };
+        self.getController = function(module, courseid) {
+        return function($scope) {
+            $scope.icon = $mmCourse.getModuleIconSrc('url');
+            $scope.title = module.name;
+            $scope.action = function(e) {
+                $state.go('site.mod_url', {module: module, courseid: courseid});
+            };
+            if (module.contents && module.contents[0] && module.contents[0].fileurl) {
+                $scope.buttons = [{
+                    icon: 'ion-link',
+                    label: 'mm.core.openinbrowser',
+                    action: function(e) {
                         e.preventDefault();
                         e.stopPropagation();
+                        $mmaModUrl.logView(module.instance).then(function() {
+                            $mmCourse.checkModuleCompletion(courseid, module.completionstatus);
+                        });
+                        $mmaModUrl.open(module.contents[0].fileurl);
                     }
-                    $state.go('site.mod_url', {module: module, courseid: courseid});
-                };
-                if (module.contents && module.contents[0] && module.contents[0].fileurl) {
-                    $scope.buttons = [{
-                        icon: 'ion-link',
-                        label: 'mm.core.openinbrowser',
-                        action: function(e) {
-                            if (e) {
-                                e.preventDefault();
-                                e.stopPropagation();
-                            }
-                            $mmaModUrl.logView(module.instance).then(function() {
-                                $mmCourse.checkModuleCompletion(courseid, module.completionstatus);
-                            });
-                            $mmaModUrl.open(module.contents[0].fileurl);
-                        }
-                    }];
-                }
-            };
-        };
-        return self;
-    };
-        self.linksHandler = function() {
-        var self = {};
-                function isEnabled(siteId, courseId) {
-            if (courseId) {
-                return $q.when(true);
-            }
-            return $mmCourse.canGetModuleWithoutCourseId(siteId);
-        }
-                self.getActions = function(siteIds, url, courseId) {
-            if (typeof self.handles(url) != 'undefined') {
-                return $mmContentLinksHelper.treatModuleIndexUrl(siteIds, url, isEnabled, courseId);
-            }
-            return $q.when([]);
-        };
-                self.handles = function(url) {
-            var position = url.indexOf('/mod/url/view.php');
-            if (position > -1) {
-                return url.substr(0, position);
+                }];
             }
         };
-        return self;
     };
     return self;
 }]);
@@ -20635,9 +18712,7 @@ angular.module('mm.addons.notifications')
     $log = $log.getInstance('mmaNotificationsActions');
     function link(scope) {
         if (scope.contexturl) {
-            $mmContentLinksDelegate.getActionsFor(scope.contexturl, scope.courseid).then(function(actions) {
-                scope.actions = actions;
-            });
+            scope.actions = $mmContentLinksDelegate.getActionsFor(scope.contexturl, scope.courseid);
         }
     }
     return {
@@ -20793,21 +18868,19 @@ angular.module('mm.addons.participants')
 }]);
 
 angular.module('mm.addons.participants')
-.factory('$mmaParticipantsHandlers', ["$mmaParticipants", "mmCoursesAccessMethods", "$mmUtil", "$state", function($mmaParticipants, mmCoursesAccessMethods, $mmUtil, $state) {
-    var self = {};
-        self.coursesNavHandler = function() {
-        var self = {};
-                self.isEnabled = function() {
+.factory('$mmaParticipantsCoursesNavHandler', ["$mmaParticipants", "mmCoursesAccessMethods", function($mmaParticipants, mmCoursesAccessMethods) {
+    return {
+                isEnabled: function() {
             return true;
-        };
-                self.isEnabledForCourse = function(courseId, accessData) {
+        },
+                isEnabledForCourse: function(courseId, accessData) {
             if (accessData && accessData.type == mmCoursesAccessMethods.guest) {
                 return false;
             }
             return $mmaParticipants.isPluginEnabledForCourse(courseId);
-        };
-                self.getController = function(courseId) {
-            return function($scope, $state) {
+        },
+                getController: function(courseId) {
+                        return function($scope, $state) {
                 $scope.icon = 'ion-person-stalker';
                 $scope.title = 'mma.participants.participants';
                 $scope.action = function($event, course) {
@@ -20818,44 +18891,8 @@ angular.module('mm.addons.participants')
                     });
                 };
             };
-        };
-        return self;
+        }
     };
-        self.linksHandler = function() {
-        var self = {};
-                self.getActions = function(siteIds, url) {
-            if (typeof self.handles(url) != 'undefined') {
-                var params = $mmUtil.extractUrlParams(url);
-                if (typeof params.id != 'undefined') {
-                    return [{
-                        message: 'mm.core.view',
-                        icon: 'ion-eye',
-                        sites: siteIds,
-                        action: function(siteId) {
-                            $state.go('redirect', {
-                                siteid: siteId,
-                                state: 'site.participants',
-                                params: {
-                                    course: {id: parseInt(params.id, 10)}
-                                }
-                            });
-                        }
-                    }];
-                }
-            }
-            return [];
-        };
-                self.handles = function(url) {
-            if (url.indexOf('grade/report/user') == -1) {
-                var position = url.indexOf('/user/index.php');
-                if (position > -1) {
-                    return url.substr(0, position);
-                }
-            }
-        };
-        return self;
-    };
-    return self;
 }]);
 
 angular.module('mm.addons.participants')
@@ -21155,17 +19192,16 @@ angular.module('mm.addons.remotestyles')
 angular.module('mm.core')
 
 .constant('mmCoreConfigConstants', {
-    "app_id" : "com.amamobile.amalmsmobile",
-    "versioncode" : "2016",
-    "versionname" : "2.1",
+    "app_id" : "com.moodle.moodlemobile",
+    "versioncode" : "2009",
+    "versionname" : "2.8",
     "cache_expiration_time" : 300000,
     "default_lang" : "en",
     "languages": {"ar": "عربي", "bg": "Български", "ca": "Català", "cs": "Čeština", "de": "Deutsch","en": "English", "es": "Español", "es-mx": "Español - México", "eu": "Euskara", "fa": "فارسی", "fr" : "Français", "he" : "עברית", "hu": "magyar", "it": "Italiano", "ja": "日本語","nl": "Nederlands", "pl": "Polski", "pt-br": "Português - Brasil", "ru": "Русский", "sv": "Svenska", "tr" : "Türkçe", "zh-cn" : "简体中文", "zh-tw" : "正體中文"},
     "wsservice" : "moodle_mobile_app",
     "wsextservice" : "local_mobile",
-    "siteurl" : "http://lms.amauonline.com",
-    "demo_sites": {},
-    "gcmpn": "694767596569",
-    "customurlscheme": "moodlemobile"
+    "siteurl": "http://lms.amauonline.com",
+    "demo_sites": {"student": {"url": "http://school.demo.moodle.net", "username": "student", "password": "moodle"}, "teacher": {"url": "http://school.demo.moodle.net", "username": "teacher", "password": "moodle"}, "cva": {"url": "http://mm.cvaconsulting.com/moodle", "username": "student", "password": "student"}},
+    "gcmpn": "694767596569"
 }
 );
