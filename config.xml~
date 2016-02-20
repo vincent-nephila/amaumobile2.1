@@ -4,7 +4,7 @@
         xmlns:android = "http://schemas.android.com/apk/res/android"
         id        = "com.amalms.amaumobile"
         versionCode = "2016"
-        version   = "2.1">
+        version   = "2">
     <name>AMAU Mobile</name>
 
     <description>
