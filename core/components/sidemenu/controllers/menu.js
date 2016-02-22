@@ -22,19 +22,17 @@ angular.module('mm.core.sidemenu')
  * @name mmSideMenuCtrl
  */
 .controller('mmSideMenuCtrl', function($scope, $state, $mmSideMenuDelegate, $mmSitesManager, $mmSite, $mmEvents,
-            $timeout, mmCoreEventLanguageChanged, mmCoreEventSiteUpdated,$mmLoginHelper) {
+            $timeout, mmCoreEventLanguageChanged, mmCoreEventSiteUpdated) {
 
     $scope.handlers = $mmSideMenuDelegate.getNavHandlers();
     $scope.areNavHandlersLoaded = $mmSideMenuDelegate.areNavHandlersLoaded;
     $scope.siteinfo = $mmSite.getInfo();
 
     $scope.logout = function() {
-	/*
-        $mmSitesManager.logout().finally(function() {
-            $state.go('mm_login.sites');
-        });
-	*/
-	$mmLoginHelper.goToAddSite();
+	
+       $mmSitesManager.logout().finally(function() {
+           $state.go('mm_login.site');
+       });
     };
 
     $mmSite.getDocsUrl().then(function(docsurl) {
