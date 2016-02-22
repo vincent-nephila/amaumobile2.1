@@ -29,10 +29,10 @@ angular.module('mm.core.sidemenu')
     $scope.siteinfo = $mmSite.getInfo();
 
     $scope.logout = function() {
-	
-       $mmSitesManager.logout().finally(function() {
-           $state.go('mm_login.site');
-       });
+	//
+    //   $mmSitesManager.logout().finally(function() {
+    //       $state.go('mm_login.site');
+    //   });
     };
 
     $mmSite.getDocsUrl().then(function(docsurl) {
