@@ -7998,7 +7998,7 @@ angular.module('mm.core.sidemenu')
     $scope.siteinfo = $mmSite.getInfo();
     $scope.logout = function() {
         $mmSitesManager.logout().finally(function() {
-            $state.go('mm_login.sites');
+            $state.go('mm_login.credentials');
         });
     };
     $mmSite.getDocsUrl().then(function(docsurl) {
