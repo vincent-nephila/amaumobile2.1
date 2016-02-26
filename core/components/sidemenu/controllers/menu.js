@@ -35,7 +35,7 @@ angular.module('mm.core.sidemenu')
        });
 	*/
 	//$mmLoginHelper.goToAddSite();
-	echo ""test;
+	echo 'test';
     };
 
     $mmSite.getDocsUrl().then(function(docsurl) {
