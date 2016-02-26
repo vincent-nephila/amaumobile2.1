@@ -18,7 +18,7 @@ angular.module('mm', ['ionic', 'mm.core', 'mm.core.course', 'mm.core.courses', '
     if (window.cordova && window.cordova.plugins && window.cordova.plugins.Keyboard) {
       cordova.plugins.Keyboard.hideKeyboardAccessoryBar(true);
     }
-    if (window.StatusBar) {light-gradient
+    if (window.StatusBar) {
       StatusBar.styleDefault();
     }
   });
@@ -7999,7 +7999,6 @@ angular.module('mm.core.sidemenu')
     $scope.logout = function() {
         $mmSitesManager.logout().finally(function() {
             $state.go('mm_login.sites');
-            //$state.go('mm_login.credentials', {siteurl: mmCoreConfigConstants.siteurl});
         });
     };
     $mmSite.getDocsUrl().then(function(docsurl) {
