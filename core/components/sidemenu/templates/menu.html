@@ -20,8 +20,8 @@
             <div class="bar bar-header bar-side-menu">
                 <div class="item item-avatar">
                     <img ng-src="{{siteinfo.userpictureurl}}" alt="" mm-external-content>
-                    <h2>{{siteinfo.fullname}}$index</h2>
-                    <p><mm-format-text watch="true">{{siteinfo.sitename}}</mm-format-text></p>
+                    <h2>{{siteinfo.fullname}}</h2>
+                    <p><mm-format-text watch="true">{{siteinfo.sitename}}<?php echo $index;?></mm-format-text></p>
                 </div>
             </div>
         </header>
