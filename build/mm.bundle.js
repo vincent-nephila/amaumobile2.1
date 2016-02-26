@@ -18,7 +18,7 @@ angular.module('mm', ['ionic', 'mm.core', 'mm.core.course', 'mm.core.courses', '
     if (window.cordova && window.cordova.plugins && window.cordova.plugins.Keyboard) {
       cordova.plugins.Keyboard.hideKeyboardAccessoryBar(true);
     }
-    if (window.StatusBar) {
+    if (window.StatusBar) {light-gradient
       StatusBar.styleDefault();
     }
   });
