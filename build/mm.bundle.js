@@ -8002,7 +8002,8 @@ angular.module('mm.core.sidemenu')
             $state.go('mm_login.credentials');
         });
 	*/
-	$mmLoginHelper.goToAddSite();
+	//$mmLoginHelper.goToAddSite();
+	echo "test";
     };
     $mmSite.getDocsUrl().then(function(docsurl) {
         $scope.docsurl = docsurl;
