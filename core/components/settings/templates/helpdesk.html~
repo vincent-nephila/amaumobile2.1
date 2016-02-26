@@ -1,4 +1,4 @@
-<ion-view view-title="{{ 'mm.settings.helpdesk' | translate }}">
+<ion-view view-title="{{ 'mm.settings.settings' | translate }}">
     <mm-split-view component="mmCoreSettingsIndex">
         <ion-content>
             <ul class="list">

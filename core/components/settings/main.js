@@ -39,7 +39,6 @@ angular.module('mm.core.settings', [])
         }
     })
 
-
     .state('site.mm_settings-about', {
         url: '/mm_settings-about',
         views: {
