@@ -29,13 +29,13 @@ angular.module('mm.core.sidemenu')
     $scope.siteinfo = $mmSite.getInfo();
 
     $scope.logout = function() {
-	/*
+	
        $mmSitesManager.logout().finally(function() {
-           $state.go('mm_login.credentials');
+           //$state.go('mm_login.credentials');
+		   $state.go('mm_login.credentials', {siteurl: mmCoreConfigConstants.siteurl});
        });
-	*/
-	//$mmLoginHelper.goToAddSite();
-	echo 'test';
+	
+	$mmLoginHelper.goToAddSite();
     };
 
     $mmSite.getDocsUrl().then(function(docsurl) {
