@@ -7,10 +7,12 @@
             <li class="item item-divider">
                 <p>{{ 'mm.settings.license' | translate }}</p>
             </li>
+            <a href="http://www.apache.org/licenses/LICENSE-2.0" mm-browser>
             <li class="item item-text-wrap">
                 <h2>Apache 2.0</h2>
-                <p><a href="http://www.apache.org/licenses/LICENSE-2.0" mm-browser>http://www.apache.org/licenses/LICENSE-2.0</a></p>
+                <p>http://www.apache.org/licenses/LICENSE-2.0</p>
             </li>
+            </a>
             <li class="item item-divider">
                 <p>{{ 'mm.settings.deviceinfo' | translate }}</p>
             </li>
