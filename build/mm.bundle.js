@@ -1,4 +1,5 @@
 // (C) Copyright 2015 Martin Dougiamas
+// (C) Copyright 2015 Martin Dougiamas
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -7522,8 +7523,9 @@ angular.module('mm.core.login')
         if ($mmSite.isLoggedIn()) {
             $state.go('site.mm_courses');
         } else {
-            $mmSitesManager.hasSites().then(function() {
-                return $state.go('mm_login.sites');
+        	  $mmSitesManager.hasSites().then(function() {
+                //return $state.go('mm_login.sites');
+                return $mmLoginHelper.goToAddSite();
             }, function() {
                 return $mmLoginHelper.goToAddSite();
             });
@@ -7991,15 +7993,15 @@ angular.module('mm.core.settings')
 }]);
 
 angular.module('mm.core.sidemenu')
-.controller('mmSideMenuCtrl', ["$scope", "$state", "$mmSideMenuDelegate", "$mmSitesManager", "$mmSite", "$mmEvents", "$timeout", "mmCoreEventLanguageChanged", "mmCoreEventSiteUpdated", function($scope, $state, $mmSideMenuDelegate, $mmSitesManager, $mmSite, $mmEvents,
-            $timeout, mmCoreEventLanguageChanged, mmCoreEventSiteUpdated) {
+.controller('mmSideMenuCtrl', ["$scope", "$state", "$mmSideMenuDelegate", "$mmSitesManager", "$mmSite", "$mmEvents", "$timeout", "mmCoreEventLanguageChanged", "mmCoreEventSiteUpdated","mmCoreConfigConstants", function($scope, $state, $mmSideMenuDelegate, $mmSitesManager, $mmSite, $mmEvents,
+            $timeout, mmCoreEventLanguageChanged, mmCoreEventSiteUpdated,mmCoreConfigConstants) {
     $scope.handlers = $mmSideMenuDelegate.getNavHandlers();
     $scope.areNavHandlersLoaded = $mmSideMenuDelegate.areNavHandlersLoaded;
     $scope.siteinfo = $mmSite.getInfo();
     $scope.logout = function() {
         $mmSitesManager.logout().finally(function() {
-            $state.go('mm_login.sites');
-            //$state.go('mm_login.credentials', {siteurl: mmCoreConfigConstants.siteurl});
+            //$state.go('mm_login.sites');
+            $state.go('mm_login.credentials', {siteurl: mmCoreConfigConstants.siteurl});
         });
     };
     $mmSite.getDocsUrl().then(function(docsurl) {
