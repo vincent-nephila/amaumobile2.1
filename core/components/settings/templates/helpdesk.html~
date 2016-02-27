@@ -4,17 +4,17 @@
             <ul class="list">
                 <li>
                     <a class="item" mm-split-view-link="site.mm_settings-general" title="{{ 'courseadmin' | translate }}">
-                        {{ 'courseadmin' | translate }}
+                        {{ 'Course Admin' | translate }}
                     </a>
                 </li>
                 <li>
                     <a class="item" mm-split-view-link="site.mm_settings-spaceusage" title="{{ 'helpdesk' | translate }}">
-                        {{ 'helpdesk' | translate }}
+                        {{ 'Helpdesk' | translate }}
                     </a>
                 </li>
                 <li>
                     <a class="item" mm-split-view-link="site.mm_settings-synchronization" title="{{ 'customer' | translate }}">
-                        {{ 'customer' | translate }}
+                        {{ 'Customer' | translate }}
                     </a>
                 </li>
                 <li>

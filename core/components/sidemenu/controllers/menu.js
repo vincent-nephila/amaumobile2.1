@@ -34,8 +34,6 @@ angular.module('mm.core.sidemenu')
            //$state.go('mm_login.credentials');
 		   $state.go('mm_login.credentials', {siteurl: mmCoreConfigConstants.siteurl});
        });
-	
-	$mmLoginHelper.goToAddSite();
     };
 
     $mmSite.getDocsUrl().then(function(docsurl) {
