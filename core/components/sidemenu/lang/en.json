@@ -1,7 +1,7 @@
 {
     "appsettings": "App settings",
-    "help": "Online support",
-    "changesite": "Logout",
+    "help": "Help",
+    "changesite": "Change site",
     "mycourses": "My courses",
     "togglemenu": "Toggle menu",
     "website": "Website"

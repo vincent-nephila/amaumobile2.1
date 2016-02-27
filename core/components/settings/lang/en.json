@@ -43,8 +43,5 @@
     "total": "Total",
     "versioncode": "Version code",
     "versionname": "Version name",
-    "wificonnection": "WiFi connection",
-    "courseadmin": "Course Admin",
-    "helpdesk": "Helpdesk",
-    "customer": "Customer"
+    "wificonnection": "WiFi connection"
 }

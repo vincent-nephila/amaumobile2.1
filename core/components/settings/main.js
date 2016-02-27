@@ -21,15 +21,6 @@ angular.module('mm.core.settings', [])
 
     $stateProvider
 
-    .state('site.mm_settings-help', {
-        url: '/mm_settings-help',
-        views: {
-            'site': {
-                templateUrl: 'core/components/settings/templates/helpdesk.html'
-            }
-        }
-    })
-
     .state('site.mm_settings', {
         url: '/mm_settings',
         views: {

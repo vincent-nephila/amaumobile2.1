@@ -7522,10 +7522,9 @@ angular.module('mm.core.login')
         if ($mmSite.isLoggedIn()) {
             $state.go('site.mm_courses');
         } else {
-/**            $mmSitesManager.hasSites().then(function() {
+            $mmSitesManager.hasSites().then(function() {
                 return $state.go('mm_login.sites');
             }, function() {
-**/		 function() {
                 return $mmLoginHelper.goToAddSite();
             });
         }
@@ -7999,7 +7998,8 @@ angular.module('mm.core.sidemenu')
     $scope.siteinfo = $mmSite.getInfo();
     $scope.logout = function() {
         $mmSitesManager.logout().finally(function() {
-            $state.go('mm_login.credential');
+            //$state.go('mm_login.sites');
+            $state.go('mm_login.credentials', {siteurl: mmCoreConfigConstants.siteurl});
         });
     };
     $mmSite.getDocsUrl().then(function(docsurl) {
