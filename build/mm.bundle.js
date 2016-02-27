@@ -63,7 +63,8 @@ angular.module('mm.core', ['pascalprecht.translate'])
                     $mmSitesManager.loadSite($stateParams.siteid).then(function() {
                         $state.go($stateParams.state, $stateParams.params);
                     }, function() {
-                        $state.go('mm_login.sites');
+                        //$state.go('mm_login.sites');
+                        $state.go('mm_login.credentials', {siteurl: mmCoreConfigConstants.siteurl});
                     });
                 }
                 $scope.$on('$ionicView.enter', function() {
