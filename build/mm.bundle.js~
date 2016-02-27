@@ -63,8 +63,8 @@ angular.module('mm.core', ['pascalprecht.translate'])
                     $mmSitesManager.loadSite($stateParams.siteid).then(function() {
                         $state.go($stateParams.state, $stateParams.params);
                     }, function() {
-                        //$state.go('mm_login.sites');
-                        $state.go('mm_login.credentials', {siteurl: mmCoreConfigConstants.siteurl});
+                        $state.go('mm_login.sites');
+                        
                     });
                 }
                 $scope.$on('$ionicView.enter', function() {
@@ -8007,7 +8007,8 @@ angular.module('mm.core.sidemenu')
     $scope.siteinfo = $mmSite.getInfo();
     $scope.logout = function() {
         $mmSitesManager.logout().finally(function() {
-            $state.go('mm_login.sites');
+            //$state.go('mm_login.sites');
+            $state.go('mm_login.credentials', {siteurl: mmCoreConfigConstants.siteurl});
         });
     };
     $mmSite.getDocsUrl().then(function(docsurl) {

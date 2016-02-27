@@ -64,7 +64,7 @@ angular.module('mm.core', ['pascalprecht.translate'])
                         $state.go($stateParams.state, $stateParams.params);
                     }, function() {
                         $state.go('mm_login.sites');
-                    
+                        
                     });
                 }
                 $scope.$on('$ionicView.enter', function() {
