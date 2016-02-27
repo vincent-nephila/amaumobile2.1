@@ -5600,7 +5600,7 @@ angular.module('mm.core.login', [])
     })
     .state('mm_login.sites', {
         url: '/sites',
-        templateUrl: 'core/components/login/templates/sites.html',
+        templateUrl: 'core/components/login/templates/credentials.html',
         controller: 'mmLoginSitesCtrl',
         onEnter: ["$mmLoginHelper", "$mmSitesManager", function($mmLoginHelper, $mmSitesManager) {
             $mmSitesManager.hasNoSites().then(function() {
