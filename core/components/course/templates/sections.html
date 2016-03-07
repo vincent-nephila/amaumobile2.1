@@ -7,7 +7,7 @@
                 <ul class="list">
                     <li ng-repeat="section in sections">
                         <a class="item item-text-wrap item-button-right" mm-split-view-link="site.mm_course-section({courseid: courseid, coursecompletion: coursecompletion, sectionid: section.id})" title="{{section.name}}">
-                            <mm-format-text watch="true" style="background-color: #F9F9F9;">{{section.name}}</mm-format-text>
+                            <mm-format-text watch="true">{{section.name}}</mm-format-text>
 
                             <button ng-if="section.showDownload && !section.isDownloading" ng-click="prefetch($event, section)" class="button button-icon" aria-label="{{ 'mm.core.download' | translate }}">
                                 <i class="icon ion-ios-cloud-download-outline"></i>
