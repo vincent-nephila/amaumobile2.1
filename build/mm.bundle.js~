@@ -5746,6 +5746,14 @@ angular.module('mm.core.settings', [])
             }
         }
     })
+    .state('site.mm_settings-help', {
+    	url: '/mm_settings-help',
+    	views: {
+          'site': {
+                templateUrl: 'core/components/settings/templates/helpdesk.html'
+            }
+        }
+    })
     .state('site.mm_settings-about', {
         url: '/mm_settings-about',
         views: {
